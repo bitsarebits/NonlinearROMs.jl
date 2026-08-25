@@ -1,142 +1,57 @@
-# GridapROMs
+# NonlinearROMs.jl
 
-This package provides a set of tools for the solution of parameterised partial differential equations (PDEs) with reduced order models (ROMs). The presence of parameters severely impacts the feasibility of running high-fidelity (HF) codes such as the finite element (FE) method, because typically the solution is required for many different values of the parameters. ROMs create surrogate models that approximate the solution manifold on a lower-dimensional manifold. These surrogates provide accurate solutions in a much shorter time and with much fewer computational resources. The library is developed in close collaboration with [Gridap.jl](https://github.com/gridap/Gridap.jl).
+Neural-network-based hyper-reduction and nonlinear reduced-order modelling
+components for [GridapROMs.jl](https://github.com/gridap/GridapROMs.jl).
 
-| **Documentation** |
-|:------------ |
-| [![docdev](https://img.shields.io/badge/docs-dev-blue.svg)](https://gridap.github.io/GridapROMs.jl/dev/) | 
-| **Citation** |
-| [![DOI](https://img.shields.io/badge/DOI-10.1016%2Fj.jcp.2022.111162-blue)](https://arxiv.org/abs/2503.15994) |
-|**Build Status** |
-| [![CI](https://github.com/gridap/GridapROMs.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/gridap/GridapROMs.jl/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/gridap/GridapROMs.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/gridap/GridapROMs.jl) |
+This package was extracted from `GridapROMs.RBSteady`/`GridapROMs.RBTransient`
+(the `NonlinearModels.jl`, `NNHyperReduction`, `NNOperatorReduction`, and
+`HighDimNN*` transient counterparts) into its own repository, and plugs back
+into `GridapROMs` via multiple dispatch — no changes to `GridapROMs` itself
+are required.
 
 ## Installation
 
-```julia
-# Type ] to enter package mode
-pkg> add GridapROMs
-```
-
-## Examples
-
-Before running the following examples, it is necessary to import from file some geometries which can be found [here](https://github.com/gridap/GridapROMs.jl/tree/main/docs/src/assets). The file name is `models.zip`. The geometries must be unzipped and moved to a directory where the numerical experiments are ran. This directory should be placed inside the `data` directory of the `Julia` project which is being used to run these experiments. To find this directory, first add the package `DrWatson` with 
+`GridapROMs` is not a registered package, so it must be added as a `dev`
+dependency (or otherwise made resolvable) before instantiating this
+environment:
 
 ```julia
-# Type ] to enter package mode
-pkg> add DrWatson
+using Pkg
+Pkg.develop(path="../GridapROMs.jl")   # or wherever your GridapROMs.jl checkout lives
+Pkg.instantiate()
 ```
 
-and call
+## Usage
 
 ```julia
-julia> test_dir = datadir()
+using GridapROMs
+using GridapROMs.RBSteady
+using NonlinearROMs
+
+res_reduction = NNHyperReduction(tol; nparams, sketch, compression)
+jac_reduction = NNOperatorReduction(tol; nparams)
+rbsolver = RBSolver(fesolver, state_reduction, res_reduction, jac_reduction)
 ```
 
-Now we can unzip the compressed folder in `dir` with 
+`NNHyperReduction`/`NNOperatorReduction` (and their transient counterparts
+`HighDimNNHyperReduction`/`HighDimNNOperatorReduction`) can be passed anywhere
+a `HyperReduction` is expected, exactly like `MDEIMHyperReduction` or
+`RBFHyperReduction`.
+
+## Contents
+
+- `NeuralNetworks.jl` — `MultiLayerPerceptron`, `GenericNeuralNetwork`,
+  `AutoEncoder`, `VariationalAutoEncoder`, `AutoDecoder`, `TrainedNeuralNetwork`,
+  `NNStrategy`.
+- `SteadyReductions.jl` / `SteadyHyperReductions.jl` / `SteadyInterpolations.jl` /
+  `SteadyReducedOperators.jl` — steady `NNOperatorReduction`/`NNHyperReduction`.
+- `TransientReductions.jl` / `TransientHyperReductions.jl` /
+  `TransientInterpolations.jl` / `TransientReducedOperators.jl` — transient
+  `HighDimNNOperatorReduction`/`HighDimNNHyperReduction`.
+
+## Testing
 
 ```julia
-julia> model_dir = joinpath(@__DIR__,"docs/src/assets")
-# Type ; to enter shell mode
-shell> unzip $model_dir/models.zip -d $test_dir
-```
-
-In the following numerical examples, we provide a plot of the convergence errors for a series of tolerances (which determine the accuracy of the method), and a solution plot obtained with a fixed tolerance of `1e-5`.
-
-### Test 1 
-
-Solve a steady elasticity problem with a [proper orthogonal decomposition algorithm](https://link.springer.com/book/10.1007/978-3-319-15431-2) (POD). The presence of parameters affecting the problem's LHS/RHS are dealt with by employing a [discrete empirical interpolation method in matrix form](https://www.sciencedirect.com/science/article/pii/S0021999115006543) (MDEIM). 
-
-```julia
-julia> include("examples/SteadyElasticityPOD.jl")
-```
-Solution             |  Convergence
-:-------------------------:|:-------------------------:
-<img src="docs/src/assets/results/elasticity_pod/plot/rbsol.png" alt="drawing" style="width:400px; height:250px;"/>  |  <img src="docs/src/assets/results/elasticity_pod/results/convergence.png" alt="drawing" style="width:400px; height:250px;"/>
-
-### Test 2
-
-Solve the same problem, but with a tensor-train (TT) decomposition approach. In particular, we employ the [TT-SVD](https://epubs.siam.org/doi/10.1137/090752286) method to compute the reduced approximation subspace, and [TT-MDEIM](https://arxiv.org/abs/2412.14460) for the system approximation. 
-
-```julia
-julia> include("examples/SteadyElasticityTTSVD.jl")
-```
-Solution             |  Convergence
-:-------------------------:|:-------------------------:
-<img src="docs/src/assets/results/elasticity_ttsvd/plot/rbsol.png" alt="drawing" style="width:400px; height:250px;"/>  |  <img src="docs/src/assets/results/elasticity_ttsvd/results/convergence.png" alt="drawing" style="width:400px; height:250px;"/>
-
-### Test 3
-
-Solve an [advection-diffusion equation](https://gridap.github.io/Tutorials/dev/pages/t010_advection_diffusion/) with TT-SVD and TT-MDEIM. 
-
-```julia
-julia> include("examples/AdvectionDiffusionTTSVD.jl")
-```
-Solution             |  Convergence
-:-------------------------:|:-------------------------:
-<img src="docs/src/assets/results/adv_diff_ttsvd/plot/rbsol.png" alt="drawing" style="width:400px; height:250px;"/>  |  <img src="docs/src/assets/results/adv_diff_ttsvd/results/convergence.png" alt="drawing" style="width:400px; height:250px;"/>
-
-### Test 4
-
-Solve a 2D [electromagnetic wave scattering problem](https://gridap.github.io/Tutorials/dev/pages/t013_emscatter/) modeled by the steady Helmholtz equation in PLM condition. We employ POD and MDEIM for the reduced problem.
-
-```julia
-julia> include("examples/HelmholtzPOD.jl")
-```
-Solution             |  Convergence
-:-------------------------:|:-------------------------:
-<img src="docs/src/assets/results/helmholtz_pod/plot/rbsol.png" alt="drawing" style="width:400px; height:250px;"/>  |  <img src="docs/src/assets/results/helmholtz_pod/results/convergence.png" alt="drawing" style="width:400px; height:250px;"/>
-
-### Test 5
-
-Solve a steady Stokes equation with a POD+MDEIM method.
-
-```julia
-julia> include("examples/SteadyStokesPOD.jl")
-```
-
-Solution - velocity          |  Solution - pressure        |  Convergence
-:-------------------------:|:-------------------------:|:-------------------------:
-<img src="docs/src/assets/results/stokes_pod/plot/rbvel.png" alt="drawing" style="width:275px; height:250px;"/>  |  <img src="docs/src/assets/results/stokes_pod/plot/rbpress.png" alt="drawing" style="width:275px; height:250px;"/>  |  <img src="docs/src/assets/results/stokes_pod/results/convergence.png" alt="drawing" style="width:275px; height:250px;"/> 
-
-### Test 6 
-
-Moving to transient applications, we first solve a heat equation with a [space-time RB-MDEIM method](https://www.sciencedirect.com/science/article/pii/S0377042724000165).
-
-```julia
-julia> include("examples/HeatEquationSTRB.jl")
-```
-
-Solution             |  Convergence
-:-------------------------:|:-------------------------:
-<img src="docs/src/assets/results/heateq_pod/plot/rbsol.gif" alt="drawing" style="width:400px; height:250px;"/>  |  <img src="docs/src/assets/results/heateq_pod/results/convergence.png" alt="drawing" style="width:400px; height:250px;"/> 
-
-### Test 7
-
-Lastly, we solve a transient Navier-Stokes equation with the same space-time RB method as in `Test 6`.
-
-```julia
-julia> include("examples/NStokesTransientSTRB.jl")
-```
-
-Solution - velocity          |  Solution - pressure        |  Convergence
-:-------------------------:|:-------------------------:|:-------------------------:
-<img src="docs/src/assets/results/nstokes_strb/plot/rbvel.gif" alt="drawing" style="width:275px; height:250px;"/>  |  <img src="docs/src/assets/results/nstokes_strb/plot/rbpress.gif" alt="drawing" style="width:275px; height:250px;"/>  |  <img src="docs/src/assets/results/nstokes_strb/results/convergence.png" alt="drawing" style="width:275px; height:250px;"/> 
-
-## How to cite GridapROMs
-
-In order to give credit to the `GridapROMs` contributors, we simply ask you to cite the references below in any publication in which you have made use of the `GridapROMs` project. 
-
-```
-@article{MUELLER2026109985,
-      title = {GridapROMs.jl: Efficient reduced order modelling in the Julia programming language},
-      journal = {Computer Physics Communications},
-      volume = {320},
-      pages = {109985},
-      year = {2026},
-      issn = {0010-4655},
-      doi = {https://doi.org/10.1016/j.cpc.2025.109985},
-      url = {https://www.sciencedirect.com/science/article/pii/S0010465525004862},
-      author = {Nicholas Mueller and Santiago Badia},
-      keywords = {PDE, Reduced order model, Julia}
-}
+using Pkg
+Pkg.test("NonlinearROMs")
 ```
