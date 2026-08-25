@@ -1,0 +1,26 @@
+name = "NonlinearROMs"
+uuid = "dcd789dd-871c-4daf-91a9-c07bc3379936"
+version = "0.1.0"
+authors = ["Nicholas Mueller <nicho.mueller@gmail.com>"]
+
+[deps]
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+Gridap = "56d4f2e9-7ea1-5844-9cf6-b9c51ca7ce8e"
+GridapROMs = "9ec1d169-1b02-4ed6-9618-ff21f43ad569"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Optimisers = "3bd65402-5787-11e9-1adc-39752487f4e2"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+
+[compat]
+ForwardDiff = "1"
+Gridap = "0.20"
+GridapROMs = "0.1, 0.2"
+Optimisers = "0.4.7"
+julia = "1.9"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
