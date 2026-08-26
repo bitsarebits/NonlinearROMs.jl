@@ -170,7 +170,7 @@ function train_deeponet!(train_state,dataloader,x_data_dev,lr_scheduler;logger::
       end
       current_loss /= length(dataloader)
 
-      step_scheduler!(lr_scheduler,train_state.optimizer_state,epoch,logger.max_epochs,current_loss;verbose=logger.verbose)
+      step_scheduler!(lr_scheduler,train_state.optimizer_state,epoch,current_loss;verbose=logger.verbose)
 
       update!(logger, epoch, current_loss)
     end
@@ -205,7 +205,7 @@ function train_nomad!(train_state,dataloader,lr_scheduler;logger::TrainingLog)
       end
       current_loss /= length(dataloader)
 
-      step_scheduler!(lr_scheduler,train_state.optimizer_state,epoch,logger.max_epochs,current_loss;verbose=logger.verbose)
+      step_scheduler!(lr_scheduler,train_state.optimizer_state,epoch,current_loss;verbose=logger.verbose)
 
       update!(logger, epoch, current_loss)
     end

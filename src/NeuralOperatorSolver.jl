@@ -60,7 +60,7 @@ pretrained_op = reduced_operator(solver_base, feop, snapshots_base)
 ft_strategy = NeuralOpStrategy(
   model = model_arch, # match the pretrained one
   epochs = 1000,
-  lr_scheduler = CosineAnnealing(lr_max=1e-5) # Smaller LR
+  lr_scheduler = CosineAnnealing(1000, lr_max=1e-5) # Smaller LR
 )
 solver_ft = NeuralOpSolver(LUSolver(), DeepONetReduction(ft_strategy))
 

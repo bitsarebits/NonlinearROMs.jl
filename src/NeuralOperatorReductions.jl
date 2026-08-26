@@ -6,7 +6,7 @@
       step_x::Int = 1
       step_t::Int = 1
       branch_sampler::Function = identity
-      lr_scheduler::S = CosineAnnealing()
+      lr_scheduler::S = CosineAnnealing(epochs)
       verbose::Bool = true
       print_every::Int = 500
     end
@@ -26,7 +26,7 @@ strategies for the offline phase.
   1. **Multi-Scale Learning:** Applying transformations (e.g., `p -> log10.(p)`) to handle parameters spanning several orders of magnitude before the automatic Z-score normalization.
   2. **Multi-Sensor/Multi-Function inputs:** Unpacking multiple parameters to sample different continuous functions, concatenating the results into a single 1D vector (see examples).
   Default: `identity`.
-- `lr_scheduler`: The learning rate scheduler to use (e.g., `CosineAnnealing()`, `ReduceLROnPlateau()`). Default: `CosineAnnealing()`.
+- `lr_scheduler`: The learning rate scheduler to use (e.g., `CosineAnnealing(epochs)`, `ReduceLROnPlateau()`). Default: `CosineAnnealing(epochs)`.
 - `verbose::Bool`: If `true`, prints compilation times, training progress, and loss metrics. Default: `true`.
 - `print_every::Int`: Frequency (in epochs) of the training progress output. Default: `500`.
 
@@ -41,7 +41,7 @@ strategy = NeuralOpStrategy(
   epochs = 5000,
   batch_size = 32,
   step_x = 2, # Use half of the spatial DoFs for training
-  lr_scheduler = CosineAnnealing(lr_max=1e-3, lr_min=1e-6)
+  lr_scheduler = CosineAnnealing(5000, lr_max=1e-3, lr_min=1e-6)
 )
 ```
 
@@ -90,7 +90,7 @@ Base.@kwdef struct NeuralOpStrategy{M,S}
   step_x::Int = 1
   step_t::Int = 1
   branch_sampler::Function = identity
-  lr_scheduler::S = CosineAnnealing()
+  lr_scheduler::S = CosineAnnealing(epochs)
   verbose::Bool = true
   print_every::Int = 500
 end

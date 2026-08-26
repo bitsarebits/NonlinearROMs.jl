@@ -37,7 +37,7 @@ Gridap.FESpaces.get_test(::MockTransientOpNOMAD) = FESpace(CartesianDiscreteMode
     model = AutoNOMAD(width=8,depth=1),
     epochs = 2,
     batch_size = 2,
-    lr_scheduler = CosineAnnealing(lr_max=0.01f0,lr_min=0.001f0),
+    lr_scheduler = CosineAnnealing(2,lr_max=0.01f0,lr_min=0.001f0),
     verbose=false
   )
   reduction = NOMADReduction(strategy)

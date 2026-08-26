@@ -61,7 +61,7 @@ strategy_base = NeuralOpStrategy(
     batch_size = 25, # Mini-batching over n_samples (150/25 = 6 batches per epoch)
     step_x = 2, # Spatial subsampling: speeds up training
     branch_sampler = branch_sampler_func,
-    lr_scheduler = CosineAnnealing(lr_max=1f-3,lr_min=1f-5),
+    lr_scheduler = CosineAnnealing(4000,lr_max=1f-3,lr_min=1f-5),
     print_every = 500
 )
 
@@ -94,7 +94,7 @@ strategy_ft = NeuralOpStrategy(
     batch_size = 15, # Mini-batching over 60 samples
     step_x = 2,
     branch_sampler = branch_sampler_func,
-    lr_scheduler = CosineAnnealing(lr_max=1f-4,lr_min=1f-6),
+    lr_scheduler = CosineAnnealing(2000,lr_max=1f-4,lr_min=1f-6),
     print_every = 500
 )
 solver_ft = NeuralOpSolver(fesolver,DeepONetReduction(strategy_ft))

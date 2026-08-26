@@ -37,12 +37,12 @@ end
 
 @testset "Learning Rate Schedulers" begin
   # CosineAnnealing
-  ca = CosineAnnealing(lr_max=1.0f0,lr_min=0.0f0)
+  ca = CosineAnnealing(100,lr_max=1.0f0,lr_min=0.0f0)
   @test get_initial_lr(ca) == 1.0f0
 
   opt_state = Optimisers.setup(Adam(1.0f0),[1.0f0])
   # Half training (50/100),cos(pi/2) = 0,lr = 0.5
-  step_scheduler!(ca,opt_state,50,100,1.0f0)
+  step_scheduler!(ca,opt_state,50,1.0f0)
   @test opt_state.rule.eta ≈ 0.5f0
 
   # ReduceLROnPlateau
@@ -52,16 +52,16 @@ end
   opt_state_plat = Optimisers.setup(Adam(1.0f0),[1.0f0])
 
   # Epoch 1: improvement
-  step_scheduler!(plat,opt_state_plat,1,100,0.5f0)
+  step_scheduler!(plat,opt_state_plat,1,0.5f0)
   @test plat.wait == 0
 
   # Epoch 2: No improvement
-  step_scheduler!(plat,opt_state_plat,2,100,0.6f0)
+  step_scheduler!(plat,opt_state_plat,2,0.6f0)
   @test plat.wait == 1
   @test opt_state_plat.rule.eta == 1.0f0 # No drop yet
 
   # Epoch 3: Patience limit reached,drop lr by half
-  step_scheduler!(plat,opt_state_plat,3,100,0.6f0)
+  step_scheduler!(plat,opt_state_plat,3,0.6f0)
   @test opt_state_plat.rule.eta ≈ 0.5f0
   @test plat.wait == 0 # Patience resetted
 end
