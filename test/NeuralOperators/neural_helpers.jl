@@ -141,9 +141,9 @@ end
 end
 
 # Dummy Scheduler to test interface fallback
-struct DummyScheduler <: NonlinearROMs.AbstractLRScheduler end
+struct DummyScheduler <: NonlinearROMs.LRScheduler end
 
-@testset "AbstractLRScheduler Interface Fallbacks" begin
+@testset "LRScheduler Interface Fallbacks" begin
   dummy = DummyScheduler()
 
   # Should throw ErrorException if methods are not implemented

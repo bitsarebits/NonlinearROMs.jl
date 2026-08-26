@@ -1,17 +1,17 @@
-abstract type AbstractLRScheduler end
+abstract type LRScheduler end
 
 # Helpers
 
-function get_lr(s::AbstractLRScheduler)
+function get_lr(s::LRScheduler)
   @abstractmethod
 end
 
-function step_scheduler!(s::AbstractLRScheduler,args...;kwargs...)
+function step_scheduler!(s::LRScheduler,args...;kwargs...)
   @abstractmethod
 end
 
 """
-    struct CosineAnnealing <: AbstractLRScheduler
+    struct CosineAnnealing <: LRScheduler
       total_epochs::Int
       lr_max::Float32
       lr_min::Float32
@@ -25,7 +25,7 @@ It smoothly decreases the learning rate from a maximum value down to a minimum v
 - `lr_max::Float32`: The initial, peak learning rate (default: `0.001f0`).
 - `lr_min::Float32`: The final, minimum learning rate at the end of training (default: `1e-6f0`).
 """
-struct CosineAnnealing <: AbstractLRScheduler
+struct CosineAnnealing <: LRScheduler
   total_epochs::Int
   lr_max::Float32
   lr_min::Float32
@@ -43,7 +43,7 @@ function step_scheduler!(s::CosineAnnealing,opt_state,epoch::Int,args...;kwargs.
 end
 
 """
-    mutable struct ReduceLROnPlateau <: AbstractLRScheduler
+    mutable struct ReduceLROnPlateau <: LRScheduler
       patience::Int
       factor::Float32
       min_lr::Float32
@@ -60,7 +60,7 @@ A dynamic learning rate scheduler that reduces the learning rate by a multiplica
 - `min_lr::Float32`: The absolute minimum learning rate boundary. The scheduler will not decay below this value (default: `1e-6f0`).
 - `start_lr::Float32`: The initial learning rate at the beginning of the training (default: `0.001f0`).
 """
-struct ReduceLROnPlateau <: AbstractLRScheduler
+struct ReduceLROnPlateau <: LRScheduler
   patience::Int
   factor::Float32
   min_lr::Float32

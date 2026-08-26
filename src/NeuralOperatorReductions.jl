@@ -1,3 +1,18 @@
+struct NeuralOptimiser
+  opt::Optimisers.AbstractRule 
+  lr_scheduler::LRScheduler
+end
+
+function NeuralOptimiser(;
+  lr_scheduler::LRScheduler,
+  opt=Optimisers.Adam(get_lr(lr_scheduler)),
+  weight_decay::Real=0.0
+  )
+
+  opt = weight_decay > 0 ? Optimisers.OptimiserChain(opt,decay) : opt
+  NeuralOptimiser(opt,lr_scheduler)
+end
+
 """
     Base.@kwdef struct NeuralOpStrategy{M,S}
       model::M
@@ -87,20 +102,48 @@ strategy_multi = NeuralOpStrategy(
   )
 ```
 """
-Base.@kwdef struct NeuralOpStrategy{M,S}
-  model::M
-  epochs::Int = 20000
-  batch_size::Int = 0
-  step_x::Int = 1
-  step_t::Int = 1
-  branch_sampler::Function = identity
-  lr_scheduler::S = CosineAnnealing(epochs)
-  verbose::Bool = true
-  print_every::Int = 500
+struct NeuralOpStrategy{A<:NeuralNetwork}
+  model::A
+  epochs::Int
+  batch_size::Int
+  sampler::NeuralSampler
+  step_x::Int
+  step_t::Int
+  branch_sampler::Function
+  optimiser::NeuralOptimiser
+  trainlog::TrainingLog
 end
 
-struct NeuralOpReduction{M,S} <: Reduction{NoReductionStyle,EuclideanNorm}
-  strategy::NeuralOpStrategy{M,S}
+function NeuralOpStrategy(
+  model::NeuralNetwork;
+  epochs::Int=20000,
+  batch_size::Int=0,
+  step_x::Int=1,
+  step_t::Int=1,
+  branch_sampler::Function=identity,
+  lr_scheduler=CosineAnnealing(epochs),
+  verbose::Bool=true,
+  print_every::Int=500,
+  kwargs...
+  )
+
+  optimiser = NeuralOptimiser(;lr_scheduler,kwargs...)
+  name = string(typeof(model))
+  trainlog = TrainingLog(name,epochs;verbose,print_every)
+  NeuralOpStrategy(
+    model,
+    epochs,
+    batch_size,
+    step_x,
+    step_t,
+    branch_sampler,
+    optimiser,
+    trainlog
+  )
+end
+
+struct NeuralOpReduction{A<:NeuralNetwork} <: Reduction{NoReductionStyle,EuclideanNorm}
+  strategy::NeuralOpStrategy{A}
 end
 
 RBSteady.ReductionStyle(r::NeuralOpReduction) = NoReductionStyle()

@@ -110,7 +110,7 @@ include("TransientInterpolations.jl")
 
 include("TransientReducedOperators.jl")
 
-export AbstractLRScheduler
+export LRScheduler
 export CosineAnnealing
 export ReduceLROnPlateau
 export step_scheduler!
@@ -119,6 +119,10 @@ include("LRSchedulers.jl")
 
 export TrainingLog
 include("TrainingLogs.jl")
+
+export Sampler
+export NeuralSampler
+include("NeuralSamplers.jl")
 
 export DeepONet
 export NOMAD

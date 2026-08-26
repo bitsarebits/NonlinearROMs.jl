@@ -8,17 +8,33 @@ function resolve_batch_size(batch_config::Int,total_samples::Int)
 end
 
 function compute_zscore_stats(data::AbstractMatrix;normalise=false)
+  if normalise 
+    stats = compute_zscore_stats(data;normalise=false)
+    normalise!(data,stats)
+    return stats
+  end
   μ = mean(data,dims=2)
   σ = std(data,dims=2)
   # Avoid dividing by zero if a feature is constant
   for i in eachindex(σ)
-    iszero(σ[i]) && (σ[i] = 1.0f0)
-  end
-  if normalise
-    data .-= μ
-    data ./= σ
+    iszero(σ[i]) && (σ[i] = one(eltype(σ)))
   end
   return (μ=Float32.(μ),σ=Float32.(σ))
+end
+
+normalise!(args...) = @abstractmethod
+
+function normalise!(data::AbstractVector,law::NamedTuple)
+  data .-= law.μ
+  data ./= law.σ
+  data
+end
+
+function normalise!(data::AbstractMatrix,law::NamedTuple)
+  for v in eachcol(data)
+    normalise!(v,law)
+  end
+  data 
 end
 
 """
@@ -54,8 +70,7 @@ function get_coords(V::SingleFieldFESpace)
   order = get_polynomial_orders(V)
   trian = get_triangulation(V)
   model = get_background_model(trian)
-  points = get_coords(model,order)
-  stack(p -> collect(p.data),vec(points))
+  get_coords(model,order)
 end
 
 function get_coords(model::CartesianDiscreteModel{D},orders::NTuple{D,Int}) where D 
