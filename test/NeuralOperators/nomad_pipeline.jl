@@ -36,7 +36,7 @@ Gridap.FESpaces.get_test(::MockTransientOpNOMAD) = LexicographicFESpace(MockMode
 
   # Strategy and Solver
   strategy = NeuralOpStrategy(
-    model = NOMAD(2,1;width=8,depth=1),
+    NOMAD(2,1;width=8,depth=1),
     epochs = 2,
     batch_size = 2,
     lr_scheduler = CosineAnnealing(2,lr_max=0.01f0,lr_min=0.001f0),
@@ -55,8 +55,8 @@ Gridap.FESpaces.get_test(::MockTransientOpNOMAD) = LexicographicFESpace(MockMode
   r_test = Realisation([[0.5f0,0.5f0]])
   x_hat,stats = solve(solver,neural_op,r_test)
   
-  @test x_hat isa RBParamVector
-  @test size(x_hat.fe_data.data) == (3,1) 
+  @test x_hat isa Snapshots
+  @test size(get_all_data(x_hat)) == (3,1)
   @test stats.name == "NOMAD Inference"
 end
 
@@ -69,7 +69,7 @@ end
   snaps = Snapshots(ConsecutiveParamArray(u_data),VectorDofMap(N_dofs),r)
 
   # coords dim is 1D coords + time = 2
-  strategy = NeuralOpStrategy(model=NOMAD(2,2;width=8,depth=1),epochs=1,verbose=false)
+  strategy = NeuralOpStrategy(NOMAD(2,2;width=8,depth=1),epochs=1,verbose=false)
   reduction = NOMADReduction(strategy)
   solver = NeuralOpSolver(LUSolver(),reduction)
 
@@ -87,7 +87,7 @@ end
   snaps = Snapshots(ConsecutiveParamArray(u_data),VectorDofMap(3),Realisation([rand(2) for _ in 1:4]))
   
   # Setup solver
-  strategy = NeuralOpStrategy(model=NOMAD(2,1;width=8,depth=1),epochs=1,verbose=false)
+  strategy = NeuralOpStrategy(NOMAD(2,1;width=8,depth=1),epochs=1,verbose=false)
   reduction = NOMADReduction(strategy)
   solver = NeuralOpSolver(LUSolver(),reduction)
 
@@ -107,7 +107,7 @@ end
     
     # Base training with 2 sensors/parameters
     snaps_base = Snapshots(ConsecutiveParamArray(rand(Float64,3,2)),VectorDofMap(3),Realisation([rand(Float32,2) for _ in 1:2]))
-    strategy = NeuralOpStrategy(model=NOMAD(2,1;width=4,depth=1),epochs=1,verbose=false)
+    strategy = NeuralOpStrategy(NOMAD(2,1;width=4,depth=1),epochs=1,verbose=false)
     solver = NeuralOpSolver(LUSolver(),NOMADReduction(strategy))
     
     pretrained_op = reduced_operator(solver,feop,snaps_base)

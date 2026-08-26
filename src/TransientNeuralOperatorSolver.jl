@@ -68,18 +68,17 @@ function Algebra.solve(
   raw_params = Float32.(matrix_of_params(param_realisation))
   n_samples = size(raw_params,2)
 
-  # Apply the branch_sampler
-  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
-  params_matrix .-= branch_stats.μ
-  params_matrix ./= branch_stats.σ
+  # Apply the parameter sampler
+  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
+  normalise!(params_matrix,branch_stats)
   f_in = params_matrix
 
-  # Trunk Input (Spatiotemporal Coordinates Extraction)
+  # Trunk Input (Spatiotemporal Coordinates Extraction, full resolution)
   t_grid = Float32.(get_times(r))
   N_time = length(t_grid)
 
   V = get_test(op.op)
-  x_raw = get_coords(V) # Shape: (D_phys,N_dofs)
+  x_raw = coords_matrix(V) # Shape: (D_phys,N_dofs)
   D_phys = size(x_raw,1)
   N_dofs = size(x_raw,2)
 
@@ -96,8 +95,7 @@ function Algebra.solve(
     end
   end
 
-  x_test .-= trunk_stats.μ
-  x_test ./= trunk_stats.σ
+  normalise!(x_test,trunk_stats)
   x_in = x_test
 
   # Inference Execution
@@ -122,10 +120,7 @@ function Algebra.solve(
   end
 
   # Wrap in GridapROMs types
-  fe_data = ConsecutiveParamArray(pred_3d)
-  dummy_red_data = ConsecutiveParamArray(zeros(Float64,1,n_samples))
-
-  x̂ = RBParamVector(dummy_red_data,fe_data)
+  x̂ = Snapshots(ConsecutiveParamArray(pred_3d),r)
   stats = CostTracker(t,nruns=n_samples,name="DeepONet Transient Inference")
 
   return x̂,stats
@@ -152,15 +147,15 @@ function Algebra.solve(
   raw_params = Float32.(matrix_of_params(param_realisation))
   n_samples = size(raw_params,2)
 
-  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
+  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
   n_sensors = size(params_matrix,1)
 
-  # Space-time grid extrapolation
+  # Space-time grid extrapolation (full resolution)
   t_grid = Float32.(get_times(r))
   N_time = length(t_grid)
 
   V = get_test(op.op)
-  x_test = get_coords(V)
+  x_test = coords_matrix(V)
   D_phys = size(x_test,1)
   N_dofs = size(x_test,2)
 
@@ -184,10 +179,8 @@ function Algebra.solve(
   end
 
   # Normalization
-  u_in .-= u_in_stats.μ
-  u_in ./= u_in_stats.σ
-  y_in .-= y_in_stats.μ
-  y_in ./= y_in_stats.σ
+  normalise!(u_in,u_in_stats)
+  normalise!(y_in,y_in_stats)
 
   # Inference
   t = @timed begin
@@ -210,10 +203,7 @@ function Algebra.solve(
   end
 
   # Packaging in GridapROMs types
-  fe_data = ConsecutiveParamArray(pred_3d)
-  dummy_red_data = ConsecutiveParamArray(zeros(Float64,1,n_samples))
-
-  x̂ = RBParamVector(dummy_red_data,fe_data)
+  x̂ = Snapshots(ConsecutiveParamArray(pred_3d),r)
   stats = CostTracker(t,nruns=n_samples,name="NOMAD Transient Inference")
 
   return x̂,stats

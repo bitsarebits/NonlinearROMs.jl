@@ -131,8 +131,10 @@ end
   # space's own free-dof numbering via direct interpolation.
   V = FESpace(model,reffe)
 
-  coords = get_coords(V)
+  points = get_coords(V)
+  coords = coords_matrix(V)
 
+  @test length(points) == 3
   @test size(coords) == (1,3) # (D_phys,N_dofs)
 
   expected_coords = Float32[0.0 0.5 1.0]

@@ -49,11 +49,11 @@ model_arch = DeepONet(1,2;width=128,depth=4,activation=Lux.gelu) # High capacity
 
 # Neural Setup (Log transform + Space-Time subsampling)
 strategy_base = NeuralOpStrategy(
-    model = model_arch,
+    model_arch,
     epochs = 3000,
     batch_size = 10, # Mini-batching over 50 samples
-    step_x = 2,step_t = 2, # Spatio-temporal subsampling
-    branch_sampler = p -> log10.(p), # The log-transform maps multi-scale variations into a manageable feature space
+    space_step = 2,time_step = 2, # Spatio-temporal subsampling
+    param_step = p -> log10.(p), # The log-transform maps multi-scale variations into a manageable feature space
     lr_scheduler = ReduceLROnPlateau(patience=200,factor=0.5f0,start_lr=1e-3),
     print_every = 500
 )
@@ -86,11 +86,11 @@ uh₀ₚ_ext(σ) = interpolate_everywhere(u₀ₚ(σ),trial(σ,t0))
 s_ext,_ = solution_snapshots(fesolver,feop_ext,σ_ext,uh₀ₚ_ext)
 
 strategy_transfer = NeuralOpStrategy(
-    model = model_arch,
+    model_arch,
     epochs = 1500,
     batch_size = 10,
-    step_x = 2,step_t = 2,
-    branch_sampler = p -> log10.(p),
+    space_step = 2,time_step = 2,
+    param_step = p -> log10.(p),
     lr_scheduler = ReduceLROnPlateau(patience=100,start_lr=5e-4),
     print_every = 500
 )

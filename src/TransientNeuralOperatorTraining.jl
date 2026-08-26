@@ -16,7 +16,7 @@ function train_neural_operator(
   raw_params = Float32.(matrix_of_params(param_realisation))
   n_samples = size(raw_params,2)
 
-  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
+  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
 
   # Time grid
   t_grid = Float32.(get_times(realisation))
@@ -25,15 +25,15 @@ function train_neural_operator(
   N_time = size(target_data,3)
 
   # Subsampling indices
-  idx_x = 1:strategy.step_x:N_dofs
-  idx_t = 1:strategy.step_t:N_time
+  idx_x = get_ids(strategy.sampler.space_sampler,N_dofs)
+  idx_t = get_ids(strategy.sampler.time_sampler,N_time)
   N_x_red = length(idx_x)
   N_t_red = length(idx_t)
   N_points = N_x_red * N_t_red
 
   # Coordinates extraction (Trunk input)
   V = get_test(feop)
-  coords_raw = get_coords(V) # Shape: (D_phys,N_dofs)
+  coords_raw = coords_matrix(V) # Shape: (D_phys,N_dofs)
   D_phys = size(coords_raw,1)
 
   # Spatio-Temporal coordinate matrix (D_phys + 1 for time,N_points)
@@ -66,13 +66,8 @@ function train_neural_operator(
   max_u = maximum(abs,u_train)
   u_train ./= max_u
 
-  branch_stats = compute_zscore_stats(params_matrix)
-  params_matrix .-= branch_stats.μ
-  params_matrix ./= branch_stats.σ
-
-  trunk_stats = compute_zscore_stats(x_train)
-  x_train .-= trunk_stats.μ
-  x_train ./= trunk_stats.σ
+  branch_stats = compute_zscore_stats(params_matrix;normalise=true)
+  trunk_stats = compute_zscore_stats(x_train;normalise=true)
 
   # DeepONet architecture
   # Input of the Trunk Net is D_phys + 1
@@ -89,17 +84,12 @@ function train_neural_operator(
   Random.seed!(rng,42)
   ps,st = Lux.setup(rng,deepONet) |> XDEV
 
-  initial_lr = get_lr(strategy.lr_scheduler)
-
-  opt = Optimisers.Adam(initial_lr)
-  train_state = Lux.Training.TrainState(deepONet,ps,st,opt)
-
-  # Verbosity level setup
-  logger = TrainingLog("DeepONet",strategy.epochs;verbose=strategy.verbose,print_every=strategy.print_every)
+  train_state = Lux.Training.TrainState(deepONet,ps,st,strategy.optimiser.opt)
 
   # Training execution defined in NeuralOperatorTraining.jl
-  ps_trained,st_trained =
-    train_deeponet!(train_state,dataloader,x_data_dev,strategy.lr_scheduler;logger=logger)
+  ps_trained,st_trained = train_deeponet!(
+    train_state,dataloader,x_data_dev,strategy.optimiser.lr_scheduler;logger=strategy.trainlog
+  )
 
   st_test = Lux.testmode(st_trained) |> CDEV
 
@@ -126,21 +116,21 @@ function train_neural_operator(
   raw_params = Float32.(matrix_of_params(param_realisation))
   n_samples = size(raw_params,2)
 
-  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
+  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
 
   t_grid = Float32.(get_times(realisation))
 
   N_dofs = size(target_data,1)
   N_time = size(target_data,3)
 
-  idx_x = 1:strategy.step_x:N_dofs
-  idx_t = 1:strategy.step_t:N_time
+  idx_x = get_ids(strategy.sampler.space_sampler,N_dofs)
+  idx_t = get_ids(strategy.sampler.time_sampler,N_time)
   N_x_red = length(idx_x)
   N_t_red = length(idx_t)
   N_points = N_x_red * N_t_red
 
   V = get_test(feop)
-  coords_raw = get_coords(V)
+  coords_raw = coords_matrix(V)
   D_phys = size(coords_raw,1)
 
   x_train = zeros(Float32,D_phys + 1,N_points)
@@ -171,27 +161,25 @@ function train_neural_operator(
   # Dimensions check for fine-tuning
   expected_branch_in = length(pretrained_op.norm_stats.branch.μ)
   expected_trunk_in = length(pretrained_op.norm_stats.trunk.μ)
-  @assert nbranch_in == expected_branch_in "Branch dimension mismatch: expected $expected_branch_in, got $nbranch_in. Check branch_sampler."
+  @assert nbranch_in == expected_branch_in "Branch dimension mismatch: expected $expected_branch_in, got $nbranch_in. Check the parameter sampler."
   @assert ntrunk_in == expected_trunk_in "Trunk dimension mismatch: expected $expected_trunk_in, got $ntrunk_in."
 
   # Normalization setup
   if update_stats
-    strategy.verbose && @info "Updating the normalization statistics."
+    strategy.trainlog.verbose && @info "Updating the normalization statistics."
     max_u = maximum(abs,u_train)
     branch_stats = compute_zscore_stats(params_matrix)
     trunk_stats = compute_zscore_stats(x_train)
   else
-    strategy.verbose && @info "Keeping the normalization statistics from the pre-trained model."
+    strategy.trainlog.verbose && @info "Keeping the normalization statistics from the pre-trained model."
     max_u = pretrained_op.max_u
     branch_stats = pretrained_op.norm_stats.branch
     trunk_stats = pretrained_op.norm_stats.trunk
   end
 
   u_train ./= max_u
-  params_matrix .-= branch_stats.μ
-  params_matrix ./= branch_stats.σ
-  x_train .-= trunk_stats.μ
-  x_train ./= trunk_stats.σ
+  normalise!(params_matrix,branch_stats)
+  normalise!(x_train,trunk_stats)
 
   # Pretrained Network
   deepONet = pretrained_op.model
@@ -204,16 +192,11 @@ function train_neural_operator(
 
   x_data_dev = x_train |> XDEV
 
-  initial_lr = get_lr(strategy.lr_scheduler)
-  opt = Optimisers.Adam(initial_lr)
-  train_state = Lux.Training.TrainState(deepONet,ps,st,opt)
-
-  # Verbosity level setup
-  logger = TrainingLog("DeepONet",strategy.epochs;verbose=strategy.verbose,print_every=strategy.print_every)
+  train_state = Lux.Training.TrainState(deepONet,ps,st,strategy.optimiser.opt)
 
   # Training
   ps_trained,st_trained = train_deeponet!(
-    train_state,dataloader,x_data_dev,strategy.lr_scheduler;logger=logger
+    train_state,dataloader,x_data_dev,strategy.optimiser.lr_scheduler;logger=strategy.trainlog
   )
 
   st_test = Lux.testmode(st_trained) |> CDEV
@@ -239,7 +222,7 @@ function train_neural_operator(
   raw_params = Float32.(matrix_of_params(param_realisation))
   n_samples = size(raw_params,2)
 
-  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
+  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
   n_sensors = size(params_matrix,1)
 
   # Time grid
@@ -249,8 +232,8 @@ function train_neural_operator(
   N_time = size(target_data,3)
 
   # Subsampling indices
-  idx_x = 1:strategy.step_x:N_dofs
-  idx_t = 1:strategy.step_t:N_time
+  idx_x = get_ids(strategy.sampler.space_sampler,N_dofs)
+  idx_t = get_ids(strategy.sampler.time_sampler,N_time)
   N_x_red = length(idx_x)
   N_t_red = length(idx_t)
 
@@ -260,7 +243,7 @@ function train_neural_operator(
 
   # Coordinates extraction (Trunk input)
   V = get_test(feop)
-  coords_raw = get_coords(V) # Shape: (D_phys,N_dofs)
+  coords_raw = coords_matrix(V) # Shape: (D_phys,N_dofs)
   x_red = @views coords_raw[:,idx_x]
   D_phys = size(x_red,1)
 
@@ -296,13 +279,8 @@ function train_neural_operator(
   max_u = maximum(abs,v_out)
   v_out ./= max_u
 
-  u_in_stats = compute_zscore_stats(u_in)
-  u_in .-= u_in_stats.μ
-  u_in ./= u_in_stats.σ
-
-  y_in_stats = compute_zscore_stats(y_in)
-  y_in .-= y_in_stats.μ
-  y_in ./= y_in_stats.σ
+  u_in_stats = compute_zscore_stats(u_in;normalise=true)
+  y_in_stats = compute_zscore_stats(y_in;normalise=true)
 
   # Building the NOMAD model
   # The network input is: sensors + (physical coordinates + 1 for time)
@@ -321,16 +299,11 @@ function train_neural_operator(
   Random.seed!(rng,42)
   ps,st = Lux.setup(rng,nomad_net) |> XDEV
 
-  initial_lr = get_lr(strategy.lr_scheduler)
-  opt = Optimisers.Adam(initial_lr)
-  train_state = Lux.Training.TrainState(nomad_net,ps,st,opt)
-
-  # Verbosity level setup
-  logger = TrainingLog("NOMAD",strategy.epochs;verbose=strategy.verbose,print_every=strategy.print_every)
+  train_state = Lux.Training.TrainState(nomad_net,ps,st,strategy.optimiser.opt)
 
   # Running the pipeline
   ps_trained,st_trained = train_nomad!(
-    train_state,dataloader,strategy.lr_scheduler;logger=logger
+    train_state,dataloader,strategy.optimiser.lr_scheduler;logger=strategy.trainlog
   )
 
   st_test = Lux.testmode(st_trained) |> CDEV
@@ -359,7 +332,7 @@ function train_neural_operator(
   raw_params = Float32.(matrix_of_params(param_realisation))
   n_samples = size(raw_params,2)
 
-  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
+  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
   n_sensors = size(params_matrix,1)
 
   t_grid = Float32.(get_times(realisation))
@@ -367,8 +340,8 @@ function train_neural_operator(
   N_dofs = size(target_data,1)
   N_time = size(target_data,3)
 
-  idx_x = 1:strategy.step_x:N_dofs
-  idx_t = 1:strategy.step_t:N_time
+  idx_x = get_ids(strategy.sampler.space_sampler,N_dofs)
+  idx_t = get_ids(strategy.sampler.time_sampler,N_time)
   N_x_red = length(idx_x)
   N_t_red = length(idx_t)
 
@@ -376,7 +349,7 @@ function train_neural_operator(
   N_tot = N_points * n_samples
 
   V = get_test(feop)
-  coords_raw = get_coords(V)
+  coords_raw = coords_matrix(V)
   x_red = @views coords_raw[:,idx_x]
   D_phys = size(x_red,1)
 
@@ -407,22 +380,20 @@ function train_neural_operator(
 
   # Normalization setup
   if update_stats
-    strategy.verbose && @info "Updating the normalization statistics."
+    strategy.trainlog.verbose && @info "Updating the normalization statistics."
     max_u = maximum(abs,v_out)
     u_in_stats = compute_zscore_stats(u_in)
     y_in_stats = compute_zscore_stats(y_in)
   else
-    strategy.verbose && @info "Keeping the normalization statistics from the pre-trained model."
+    strategy.trainlog.verbose && @info "Keeping the normalization statistics from the pre-trained model."
     max_u = pretrained_op.max_u
     u_in_stats = pretrained_op.norm_stats.u_in
     y_in_stats = pretrained_op.norm_stats.y_in
   end
 
   v_out ./= max_u
-  u_in .-= u_in_stats.μ
-  u_in ./= u_in_stats.σ
-  y_in .-= y_in_stats.μ
-  y_in ./= y_in_stats.σ
+  normalise!(u_in,u_in_stats)
+  normalise!(y_in,y_in_stats)
 
   # Pretrained Network
   nomad_net = pretrained_op.model
@@ -438,16 +409,11 @@ function train_neural_operator(
     partial=false
   )
 
-  initial_lr = get_lr(strategy.lr_scheduler)
-  opt = Optimisers.Adam(initial_lr)
-  train_state = Lux.Training.TrainState(nomad_net,ps,st,opt)
-
-  # Verbosity level setup
-  logger = TrainingLog("NOMAD",strategy.epochs;verbose=strategy.verbose,print_every=strategy.print_every)
+  train_state = Lux.Training.TrainState(nomad_net,ps,st,strategy.optimiser.opt)
 
   # Training
   ps_trained,st_trained = train_nomad!(
-    train_state,dataloader,strategy.lr_scheduler;logger=logger
+    train_state,dataloader,strategy.optimiser.lr_scheduler;logger=strategy.trainlog
   )
 
   st_test = Lux.testmode(st_trained) |> CDEV

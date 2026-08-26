@@ -38,33 +38,15 @@ function normalise!(data::AbstractMatrix,law::NamedTuple)
 end
 
 """
-    sample_branch_inputs(branch_sampler,raw_params::AbstractMatrix) -> Matrix{Float32}
+    get_coords(V::SingleFieldFESpace) -> Array{Point{D,Float64}}
 
-Applies `branch_sampler` column-wise to `raw_params` (shape `(n_params,n_samples)`),
-returning the `(nbranch_in,n_samples)` matrix of sampled Branch/sensor inputs.
-The output matrix is preallocated once its width is known from the first sample,
-avoiding the per-sample allocations of a list comprehension followed by `reduce(hcat,...)`.
-"""
-function sample_branch_inputs(branch_sampler,raw_params::AbstractMatrix)
-  n_samples = size(raw_params,2)
-  first_col = Float32.(branch_sampler(view(raw_params,:,1)))
-  params_matrix = zeros(Float32,length(first_col),n_samples)
-  params_matrix[:,1] .= first_col
-  for i in 2:n_samples
-    params_matrix[:,i] .= branch_sampler(view(raw_params,:,i))
-  end
-  return params_matrix
-end
-
-"""
-    get_coords(V::SingleFieldFESpace) -> Matrix{Float32}
-
-Extracts the physical coordinates of the free DoFs of `V`, shaped
-`(D_phys, N_dofs)` and indexed consistently with `V`'s own free-dof numbering
-(the same numbering used by `get_all_data`/`get_free_dof_values` on `V`). Since
-the mapping is obtained by directly interpolating the coordinate field onto
-`V`, it is valid for any `SingleFieldFESpace` -- no special DoF ordering is
-required.
+Extracts the physical coordinates of the free DoFs of `V`, indexed consistently
+with `V`'s own free-dof numbering (the same numbering used by
+`get_all_data`/`get_free_dof_values` on `V`). Since the mapping is obtained by
+directly interpolating the coordinate field onto `V`, it is valid for any
+`SingleFieldFESpace` -- no special DoF ordering is required. Use
+`sample(sampler::NeuralSampler,get_coords(V))` to subsample and stack the
+result into a `(D_phys,N_dofs)` `Matrix{Float32}`.
 """
 function get_coords(V::SingleFieldFESpace)
   order = get_polynomial_orders(V)
@@ -99,6 +81,16 @@ function _is_periodic_node(inode,nodes)
     return true
   end
 end
+
+"""
+    coords_matrix(V::SingleFieldFESpace) -> Matrix{Float32}
+
+Full-resolution counterpart of `sample(sampler::NeuralSampler,get_coords(V))`: stacks
+every DoF coordinate of `V` (no spatial subsampling) into a `(D_phys,N_dofs)` matrix.
+Used at inference time, where predictions are required at every DoF regardless of the
+spatial subsampling used during training.
+"""
+coords_matrix(V::SingleFieldFESpace) = Float32.(stack(p -> collect(p.data),vec(get_coords(V))))
 
 # Build model
 
@@ -243,14 +235,14 @@ function train_neural_operator(
   target_data_full = Float32.(get_all_data(s))
   N_dofs = size(target_data_full,1)
 
-  idx_x = 1:strategy.step_x:N_dofs
+  idx_x = get_ids(strategy.sampler.space_sampler,N_dofs)
   target_data = @views target_data_full[idx_x,:]
 
   realisation = get_realisation(s)
   raw_params = Float32.(matrix_of_params(realisation))
   n_samples = size(raw_params,2)
 
-  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
+  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
 
   # normalization
   max_u = maximum(abs,target_data)
@@ -258,8 +250,7 @@ function train_neural_operator(
 
   # DoF coordinates extraction (Trunk input)
   V = get_test(feop)
-  x_train_full = get_coords(V) # shape: (D_phys,full_N_dofs)
-  x_train = @views x_train_full[:,idx_x]
+  x_train = sample(strategy.sampler,get_coords(V)) # shape: (D_phys,N_dofs_reduced)
 
   # Input normalization
   branch_stats = compute_zscore_stats(params_matrix;normalise=true)
@@ -282,16 +273,12 @@ function train_neural_operator(
   Random.seed!(42)
   ps,st = Lux.setup(Random.default_rng(),deepONet) |> XDEV
 
-  initial_lr = get_lr(strategy.lr_scheduler)
-
-  opt = Optimisers.Adam(initial_lr)
-  train_state = Lux.Training.TrainState(deepONet,ps,st,opt)
-
-  # Verbosity level setup
-  logger = TrainingLog("DeepONet",strategy.epochs;verbose=strategy.verbose,print_every=strategy.print_every)
+  train_state = Lux.Training.TrainState(deepONet,ps,st,strategy.optimiser.opt)
 
   # Executing the pipeline
-  ps_trained,st_trained = train_deeponet!(train_state,dataloader,x_data_dev,strategy.lr_scheduler;logger=logger)
+  ps_trained,st_trained = train_deeponet!(
+    train_state,dataloader,x_data_dev,strategy.optimiser.lr_scheduler;logger=strategy.trainlog
+  )
 
   st_test = Lux.testmode(st_trained) |> CDEV
 
@@ -315,18 +302,17 @@ function train_neural_operator(
   target_data_full = Float32.(get_all_data(s))
   N_dofs = size(target_data_full,1)
 
-  idx_x = 1:strategy.step_x:N_dofs
+  idx_x = get_ids(strategy.sampler.space_sampler,N_dofs)
   target_data = @views target_data_full[idx_x,:]
 
   realisation = get_realisation(s)
   raw_params = Float32.(matrix_of_params(realisation))
   n_samples = size(raw_params,2)
 
-  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
+  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
 
   V = get_test(feop)
-  x_train_full = get_coords(V)
-  x_train = @views x_train_full[:,idx_x]
+  x_train = sample(strategy.sampler,get_coords(V))
 
   nbranch_in = size(params_matrix,1)
   ntrunk_in = size(x_train,1)
@@ -334,17 +320,17 @@ function train_neural_operator(
   # Dimensions check for fine-tuning
   expected_branch_in = length(pretrained_op.norm_stats.branch.μ)
   expected_trunk_in = length(pretrained_op.norm_stats.trunk.μ)
-  @assert nbranch_in == expected_branch_in "Branch dimension mismatch: expected $expected_branch_in,got $nbranch_in. Check branch_sampler."
+  @assert nbranch_in == expected_branch_in "Branch dimension mismatch: expected $expected_branch_in,got $nbranch_in. Check the parameter sampler."
   @assert ntrunk_in == expected_trunk_in "Trunk dimension mismatch: expected $expected_trunk_in,got $ntrunk_in."
 
   # Normalization setup
   if update_stats
-    strategy.verbose && @info "Recomputing the normalization statistics."
+    strategy.trainlog.verbose && @info "Recomputing the normalization statistics."
     max_u = maximum(abs,target_data)
     branch_stats = compute_zscore_stats(params_matrix)
     trunk_stats = compute_zscore_stats(x_train)
   else
-    strategy.verbose && @info "Inheriting the normalization statistics from the pre-trained model."
+    strategy.trainlog.verbose && @info "Inheriting the normalization statistics from the pre-trained model."
     max_u = pretrained_op.max_u
     branch_stats = pretrained_op.norm_stats.branch
     trunk_stats = pretrained_op.norm_stats.trunk
@@ -352,10 +338,8 @@ function train_neural_operator(
 
   # Normalization
   target_data ./= max_u
-  params_matrix .-= branch_stats.μ
-  params_matrix ./= branch_stats.σ
-  x_train .-= trunk_stats.μ
-  x_train ./= trunk_stats.σ
+  normalise!(params_matrix,branch_stats)
+  normalise!(x_train,trunk_stats)
 
   # Pretrained-model
   deepONet = pretrained_op.model
@@ -373,16 +357,11 @@ function train_neural_operator(
 
   x_data_dev = x_train |> XDEV
 
-  initial_lr = get_lr(strategy.lr_scheduler)
-  opt = Optimisers.Adam(initial_lr) # New LR
-  train_state = Lux.Training.TrainState(deepONet,ps,st,opt)
-
-  # Verbosity level setup
-  logger = TrainingLog("DeepONet",strategy.epochs;verbose=strategy.verbose,print_every=strategy.print_every)
+  train_state = Lux.Training.TrainState(deepONet,ps,st,strategy.optimiser.opt)
 
   # Training
   ps_trained,st_trained = train_deeponet!(
-    train_state,dataloader,x_data_dev,strategy.lr_scheduler;logger=logger
+    train_state,dataloader,x_data_dev,strategy.optimiser.lr_scheduler;logger=strategy.trainlog
   )
 
   st_test = Lux.testmode(st_trained) |> CDEV
@@ -404,7 +383,7 @@ function train_neural_operator(
   target_data_full = Float32.(get_all_data(s))
   N_dofs = size(target_data_full,1)
 
-  idx_x = 1:strategy.step_x:N_dofs
+  idx_x = get_ids(strategy.sampler.space_sampler,N_dofs)
   N_x_red = length(idx_x)
 
   realisation = get_realisation(s)
@@ -412,13 +391,12 @@ function train_neural_operator(
   n_samples = size(raw_params,2)
 
   # Sensors extraction (like branch input in DeepONet)
-  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
+  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
   n_sensors = size(params_matrix,1)
 
   # DoF coordinates extraction (like trunk input in DeepONet)
   V = get_test(feop)
-  x_train_full = get_coords(V) # shape: (D_phys,full_N_dofs)
-  x_red = @views x_train_full[:,idx_x]
+  x_red = sample(strategy.sampler,get_coords(V)) # shape: (D_phys,N_x_red)
   D_phys = size(x_red,1)
 
   # Flattening for NOMAD
@@ -461,16 +439,11 @@ function train_neural_operator(
   Random.seed!(42)
   ps,st = Lux.setup(Random.default_rng(),nomad_net) |> XDEV
 
-  initial_lr = get_lr(strategy.lr_scheduler)
-  opt = Optimisers.Adam(initial_lr)
-  train_state = Lux.Training.TrainState(nomad_net,ps,st,opt)
-
-  # Verbosity level setup
-  logger = TrainingLog("NOMAD",strategy.epochs;verbose=strategy.verbose,print_every=strategy.print_every)
+  train_state = Lux.Training.TrainState(nomad_net,ps,st,strategy.optimiser.opt)
 
   # Running the pipeline
   ps_trained,st_trained = train_nomad!(
-    train_state,dataloader,strategy.lr_scheduler;logger=logger
+    train_state,dataloader,strategy.optimiser.lr_scheduler;logger=strategy.trainlog
   )
 
   st_test = Lux.testmode(st_trained) |> CDEV
@@ -495,19 +468,18 @@ function train_neural_operator(
   target_data_full = Float32.(get_all_data(s))
   N_dofs = size(target_data_full,1)
 
-  idx_x = 1:strategy.step_x:N_dofs
+  idx_x = get_ids(strategy.sampler.space_sampler,N_dofs)
   N_x_red = length(idx_x)
 
   realisation = get_realisation(s)
   raw_params = Float32.(matrix_of_params(realisation))
   n_samples = size(raw_params,2)
 
-  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
+  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
   n_sensors = size(params_matrix,1)
 
   V = get_test(feop)
-  x_train_full = get_coords(V)
-  x_red = @views x_train_full[:,idx_x]
+  x_red = sample(strategy.sampler,get_coords(V))
   D_phys = size(x_red,1)
 
   # Flattening for NOMAD
@@ -536,22 +508,20 @@ function train_neural_operator(
 
   # Normalization
   if update_stats
-    strategy.verbose && @info "Recomputing the normalization statistics."
+    strategy.trainlog.verbose && @info "Recomputing the normalization statistics."
     max_u = maximum(abs,v_out)
     u_in_stats = compute_zscore_stats(u_in)
     y_in_stats = compute_zscore_stats(y_in)
   else
-    strategy.verbose && @info "Inheriting the normalization statistics from the pre-trained model."
+    strategy.trainlog.verbose && @info "Inheriting the normalization statistics from the pre-trained model."
     max_u = pretrained_op.max_u
     u_in_stats = pretrained_op.norm_stats.u_in
     y_in_stats = pretrained_op.norm_stats.y_in
   end
 
   v_out ./= max_u
-  u_in .-= u_in_stats.μ
-  u_in ./= u_in_stats.σ
-  y_in .-= y_in_stats.μ
-  y_in ./= y_in_stats.σ
+  normalise!(u_in,u_in_stats)
+  normalise!(y_in,y_in_stats)
 
   # Pretrained model
   nomad_net = pretrained_op.model
@@ -567,16 +537,11 @@ function train_neural_operator(
     partial=false
   )
 
-  initial_lr = get_lr(strategy.lr_scheduler)
-  opt = Optimisers.Adam(initial_lr)
-  train_state = Lux.Training.TrainState(nomad_net,ps,st,opt)
-
-  # Verbosity level setup
-  logger = TrainingLog("NOMAD",strategy.epochs;verbose=strategy.verbose,print_every=strategy.print_every)
+  train_state = Lux.Training.TrainState(nomad_net,ps,st,strategy.optimiser.opt)
 
   # Training
   ps_trained,st_trained = train_nomad!(
-    train_state,dataloader,strategy.lr_scheduler;logger=logger
+    train_state,dataloader,strategy.optimiser.lr_scheduler;logger=strategy.trainlog
   )
 
   st_test = Lux.testmode(st_trained) |> CDEV

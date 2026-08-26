@@ -122,12 +122,17 @@ include("TrainingLogs.jl")
 
 export Sampler
 export NeuralSampler
+export sample
+export get_ids
+export get_param_ids
+export get_time_ids
 include("NeuralSamplers.jl")
 
 export DeepONet
 export NOMAD
 include("NeuralOperatorModels.jl")
 
+export NeuralOptimiser
 export NeuralOpStrategy
 export NeuralOpReduction
 export DeepONetReduction
@@ -140,11 +145,13 @@ export train_neural_operator
 export train_deeponet!
 export train_nomad!
 export get_coords
+export coords_matrix
 export resolve_batch_size
 export XDEV
 export CDEV
 export build_model
 export compute_zscore_stats
+export normalise!
 include("NeuralOperatorTraining.jl")
 include("TransientNeuralOperatorTraining.jl")
 

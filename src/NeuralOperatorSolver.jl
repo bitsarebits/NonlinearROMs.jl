@@ -52,13 +52,13 @@ It initializes the neural network with the weights and states of the `pretrained
 model_arch = DeepONet(2,2)
 
 # Base Training
-base_strategy = NeuralOpStrategy(model=model_arch, epochs=5000)
+base_strategy = NeuralOpStrategy(model_arch, epochs=5000)
 solver_base = NeuralOpSolver(LUSolver(), DeepONetReduction(base_strategy))
 pretrained_op = reduced_operator(solver_base, feop, snapshots_base)
 
 # Fine-Tuning with a smaller learning rate on a refined dataset
 ft_strategy = NeuralOpStrategy(
-  model = model_arch, # match the pretrained one
+  model_arch, # match the pretrained one
   epochs = 1000,
   lr_scheduler = CosineAnnealing(1000, lr_max=1e-5) # Smaller LR
   )
@@ -121,17 +121,15 @@ function Algebra.solve(
   raw_params = Float32.(matrix_of_params(r))
   n_samples = size(raw_params,2)
 
-  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
-  params_matrix .-= branch_stats.μ
-  params_matrix ./= branch_stats.σ
+  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
+  normalise!(params_matrix,branch_stats)
   f_in = params_matrix
 
-  # Trunk Input (Coordinates extraction)
+  # Trunk Input (Coordinates extraction, full resolution)
   V = get_test(op.op)
 
-  x_test = get_coords(V)
-  x_test .-= trunk_stats.μ
-  x_test ./= trunk_stats.σ
+  x_test = coords_matrix(V)
+  normalise!(x_test,trunk_stats)
   x_in = x_test
 
   # Inference Execution
@@ -142,14 +140,7 @@ function Algebra.solve(
   # Denormalize output
   pred_cpu .*= max_u
 
-  # Data Packaging for GridapROMs
-  fe_data = ConsecutiveParamArray(Float64.(pred_cpu))
-
-  # RBParamVector requires a reduced-data component; neural operators
-  # directly predict the FE solution, so this component is empty/dummy.
-  dummy_red_data = ConsecutiveParamArray(zeros(Float64,1,n_samples))
-
-  x̂ = RBParamVector(dummy_red_data,fe_data)
+  x̂ = Snapshots(ConsecutiveParamArray(pred_cpu),r)
   stats = CostTracker(t,nruns=n_samples,name="DeepONet Inference")
 
   return x̂,stats
@@ -174,12 +165,12 @@ function Algebra.solve(
   raw_params = Float32.(matrix_of_params(r))
   n_samples = size(raw_params,2)
 
-  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
+  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
   n_sensors = size(params_matrix,1)
 
-  # Coordinates extraction
+  # Coordinates extraction (full resolution)
   V = get_test(op.op)
-  x_test = get_coords(V)
+  x_test = coords_matrix(V)
   D_phys = size(x_test,1)
   N_dofs = size(x_test,2)
 
@@ -199,10 +190,8 @@ function Algebra.solve(
   end
 
   # Normalization
-  u_in .-= u_in_stats.μ
-  u_in ./= u_in_stats.σ
-  y_in .-= y_in_stats.μ
-  y_in ./= y_in_stats.σ
+  normalise!(u_in,u_in_stats)
+  normalise!(y_in,y_in_stats)
 
   # Inference
   t = @timed begin
@@ -222,11 +211,7 @@ function Algebra.solve(
     end
   end
 
-  # Packaging in GridapROMs types
-  fe_data = ConsecutiveParamArray(pred_2d)
-  dummy_red_data = ConsecutiveParamArray(zeros(Float64,1,n_samples))
-
-  x̂ = RBParamVector(dummy_red_data,fe_data)
+  x̂ = Snapshots(ConsecutiveParamArray(pred_2d),r)
   stats = CostTracker(t,nruns=n_samples,name="NOMAD Inference")
 
   return x̂,stats

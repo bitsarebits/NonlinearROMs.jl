@@ -9,7 +9,7 @@ function NeuralOptimiser(;
   weight_decay::Real=0.0
   )
 
-  opt = weight_decay > 0 ? Optimisers.OptimiserChain(opt,decay) : opt
+  opt = weight_decay > 0 ? Optimisers.OptimiserChain(opt,Optimisers.WeightDecay(weight_decay)) : opt
   NeuralOptimiser(opt,lr_scheduler)
 end
 
@@ -18,9 +18,9 @@ end
       model::M
       epochs::Int = 20000
       batch_size::Int = 0
-      step_x::Int = 1
-      step_t::Int = 1
-      branch_sampler::Function = identity
+      space_step = 1
+      param_step = 1
+      time_step = nothing
       lr_scheduler::S = CosineAnnealing(epochs)
       verbose::Bool = true
       print_every::Int = 500
@@ -38,13 +38,12 @@ strategies for the offline phase.
   uniform stack of `depth` hidden layers of `width` neurons from the given input dimensions.
 - `epochs::Int`: Total number of training epochs. Default: `20000`.
 - `batch_size::Int`: The batch size for training. If set to `0` or a negative value, it defaults to the total number of available samples (full-batch). Default: `0`.
-- `step_x::Int`: Spatial subsampling step. Extracts 1 DoF every `step_x` for the Trunk/Coordinate inputs. Useful for reducing memory footprints in dense meshes. Default: `1`.
-- `step_t::Int`: Temporal subsampling step (used only for transient problems). Default: `1`.
-- `branch_sampler::Function`: A custom function to preprocess or extract specific sensor values/parameters from the raw parametric matrix before feeding them to the Branch Net (or NOMAD sensors).
-  It receives a single parameter vector `p` for each sample. This is extremely powerful for:
-  1. **Multi-Scale Learning:** Applying transformations (e.g., `p -> log10.(p)`) to handle parameters spanning several orders of magnitude before the automatic Z-score normalization.
-  2. **Multi-Sensor/Multi-Function inputs:** Unpacking multiple parameters to sample different continuous functions, concatenating the results into a single 1D vector (see examples).
-  Default: `identity`.
+- `sampler::NeuralSampler`: Built from `space_step`/`param_step`/`time_step`, controls how the
+  spatial DoFs, the parameters, and (for transient problems) the time steps are subsampled
+  from the full-order data before feeding it to the network. Each of `space_step`/`param_step`/
+  `time_step` can be an `Integer` (stride), a `Function` (a per-sample transform, e.g.
+  `p -> log10.(p)`), an `AbstractVector` of explicit indices, or `nothing`/`identity` (no
+  subsampling). Default: `space_step=1`, `param_step=1`, `time_step=nothing`.
 - `lr_scheduler`: The learning rate scheduler to use (e.g., `CosineAnnealing(epochs)`, `ReduceLROnPlateau()`). Default: `CosineAnnealing(epochs)`.
 - `verbose::Bool`: If `true`, prints compilation times, training progress, and loss metrics. Default: `true`.
 - `print_every::Int`: Frequency (in epochs) of the training progress output. Default: `500`.
@@ -56,49 +55,20 @@ strategies for the offline phase.
 using Lux
 
 strategy = NeuralOpStrategy(
-  model = DeepONet(2, 2; width=64, depth=3, activation=Lux.gelu), # 2 params -> Branch; 2D coords -> Trunk
+  DeepONet(2, 2; width=64, depth=3, activation=Lux.gelu), # 2 params -> Branch; 2D coords -> Trunk
   epochs = 5000,
   batch_size = 32,
-  step_x = 2, # Use half of the spatial DoFs for training
+  space_step = 2, # Use half of the spatial DoFs for training
   lr_scheduler = CosineAnnealing(5000, lr_max=1e-3, lr_min=1e-6)
   )
 ```
 
-**Advanced Usage (Multi-Sensor & Multi-Scale):**
+**Advanced Usage (Multi-Scale Learning):**
 ```julia
 # Log-transform for parameters spanning huge ranges (e.g., 1e-(beta) with beta = 1:0.2:5)
 strategy_log = NeuralOpStrategy(
-  model = DeepONet(2, 3; width=64, depth=3), # 2 params -> Branch; 3D coords -> Trunk
-  branch_sampler = p -> log10.(p)
-  )
-
-# Multi-parameter sampling mapping into concatenated sensor functions
-m_sensors = 100
-
-# x_sensors does not need to be a uniform grid. It can be any array of coordinates,
-# for example, denser around localized features or sharp gradients.
-x_sensors = range(0, 1, length=m_sensors)
-
-f1(x, sigma) = (1 / √(2 * π * sigma)) * exp(-x^2 / (2 * sigma))
-f2(x, sigma) = sigma * x^2
-f3(x, mu) = sin(mu * x)
-
-branch_sampler_func = (p) -> begin
-    sigma, mu = p[1], p[2]
-
-    # Sample the functions using the current parameters
-    sensors_f1 = [f1(x, sigma) for x in x_sensors]
-    sensors_f2 = [f2(x, sigma) for x in x_sensors]
-    sensors_f3 = [f3(x, mu) for x in x_sensors]
-
-    # IMPORTANT: The Branch Net expects a single flat 1D vector per sample.
-    # You must concatenate all sensor arrays using `vcat`.
-    return vcat(sensors_f1, sensors_f2, sensors_f3) # Returns a flat 1D vector of length 300
-end
-
-strategy_multi = NeuralOpStrategy(
-  model = DeepONet(300, 1; width=64, depth=3), # 300 concatenated sensors -> Branch; 1D coords -> Trunk
-  branch_sampler = branch_sampler_func
+  DeepONet(2, 3; width=64, depth=3), # 2 params -> Branch; 3D coords -> Trunk
+  param_step = p -> log10.(p)
   )
 ```
 """
@@ -107,9 +77,6 @@ struct NeuralOpStrategy{A<:NeuralNetwork}
   epochs::Int
   batch_size::Int
   sampler::NeuralSampler
-  step_x::Int
-  step_t::Int
-  branch_sampler::Function
   optimiser::NeuralOptimiser
   trainlog::TrainingLog
 end
@@ -118,25 +85,24 @@ function NeuralOpStrategy(
   model::NeuralNetwork;
   epochs::Int=20000,
   batch_size::Int=0,
-  step_x::Int=1,
-  step_t::Int=1,
-  branch_sampler::Function=identity,
+  space_step=1,
+  param_step=1,
+  time_step=nothing,
   lr_scheduler=CosineAnnealing(epochs),
   verbose::Bool=true,
   print_every::Int=500,
   kwargs...
   )
 
+  sampler = NeuralSampler(;space_step,param_step,time_step)
   optimiser = NeuralOptimiser(;lr_scheduler,kwargs...)
-  name = string(typeof(model))
+  name = string(nameof(typeof(model)))
   trainlog = TrainingLog(name,epochs;verbose,print_every)
   NeuralOpStrategy(
     model,
     epochs,
     batch_size,
-    step_x,
-    step_t,
-    branch_sampler,
+    sampler,
     optimiser,
     trainlog
   )
@@ -151,7 +117,7 @@ RBSteady.NormStyle(r::NeuralOpReduction) = EuclideanNorm()
 get_strategy(r::NeuralOpReduction) = r.strategy
 
 """
-    const DeepONetReduction{M<:DeepONet,S} = NeuralOpReduction{M,S}
+    const DeepONetReduction{M<:DeepONet} = NeuralOpReduction{M}
 
 A reduction wrapper for the Deep Operator Network (DeepONet) strategy.
 It instructs the ROM solvers to use the DeepONet pipeline during the offline and online phases.
@@ -163,17 +129,17 @@ It instructs the ROM solvers to use the DeepONet pipeline during the offline and
 # Examples
 ```julia
 # Using an explicit strategy
-strategy = NeuralOpStrategy(model=DeepONet(2,3;width=64,depth=3), epochs=1000)
+strategy = NeuralOpStrategy(DeepONet(2,3;width=64,depth=3), epochs=1000)
 reduction = DeepONetReduction(strategy)
 
 # Using kwargs directly
 reduction = DeepONetReduction(model=DeepONet(2,3;width=64,depth=3), epochs=1000, batch_size=32)
 ```
 """
-const DeepONetReduction{M<:DeepONet,S} = NeuralOpReduction{M,S}
+const DeepONetReduction{M<:DeepONet} = NeuralOpReduction{M}
 
 """
-    const NOMADReduction{M<:NOMAD,S} = NeuralOpReduction{M,S}
+    const NOMADReduction{M<:NOMAD} = NeuralOpReduction{M}
 
 A reduction wrapper for the NOMAD (Non-linear Manifold Decoder) neural operator strategy.
 It instructs the ROM solvers to use the NOMAD pipeline during the offline and online phases.
@@ -185,42 +151,21 @@ It instructs the ROM solvers to use the NOMAD pipeline during the offline and on
 # Examples
 ```julia
 # Using an explicit strategy
-strategy = NeuralOpStrategy(model=NOMAD(2,3;width=32,depth=2), epochs=1000)
+strategy = NeuralOpStrategy(NOMAD(2,3;width=32,depth=2), epochs=1000)
 reduction = NOMADReduction(strategy)
 
 # Using kwargs directly
 reduction = NOMADReduction(model=NOMAD(2,3;width=32,depth=2), epochs=1000)
 ```
 """
-const NOMADReduction{M<:NOMAD,S} = NeuralOpReduction{M,S}
+const NOMADReduction{M<:NOMAD} = NeuralOpReduction{M}
 
 for (f,m) in ((:DeepONetReduction,:DeepONet),(:NOMADReduction,:NOMAD))
   @eval begin
     $f(s::NeuralOpStrategy{<:$m}) = NeuralOpReduction(s)
 
-    function $f(;
-      model::$m,
-      epochs::Int=20000,
-      batch_size::Int=0,
-      step_x::Int=1,
-      step_t::Int=1,
-      branch_sampler::Function=identity,
-      lr_scheduler=CosineAnnealing(epochs),
-      verbose::Bool=true,
-      print_every::Int=500,
-      )
-
-      strategy = NeuralOpStrategy(
-        model=model,
-        epochs=epochs,
-        batch_size=batch_size,
-        step_x=step_x,
-        step_t=step_t,
-        branch_sampler=branch_sampler,
-        lr_scheduler=lr_scheduler,
-        verbose=verbose,
-        print_every=print_every
-      )
+    function $f(;model::$m,kwargs...)
+      strategy = NeuralOpStrategy(model;kwargs...)
       NeuralOpReduction(strategy)
     end
   end
@@ -249,7 +194,7 @@ solver = NeuralOpSolver(LUSolver(), DeepONetReduction(model=DeepONet(2,2)))
 using Lux
 
 strategy = NeuralOpStrategy(
-  model = DeepONet(2, 2; width=128, depth=4, activation=Lux.gelu),
+  DeepONet(2, 2; width=128, depth=4, activation=Lux.gelu),
   epochs = 1000
   )
 reduction = DeepONetReduction(strategy)

@@ -51,7 +51,7 @@ end
 
 function sample(s::NeuralSampler,x::AbstractArray{<:Point})
   points = sample(s.space_sampler,vec(x))
-  stack(p -> collect(p.data),vec(points))
+  Float32.(stack(p -> collect(p.data),vec(points)))
 end
 
 function param_sample(s::NeuralSampler{A,Nothing},x::Snapshots) where A
@@ -96,6 +96,18 @@ function sample(s::TransientNeuralSampler,x::TransientSnapshots)
 end
 
 # utils
+
+"""
+    get_ids(s::Sampler,n::Int) -> AbstractVector{Int}
+
+Resolves the explicit set of indices (out of `1:n`) selected by `s`: the full
+range strided by `s.strategy` when it is an `Integer`, `s.strategy` itself when
+it is already an `AbstractVector` of indices, or `1:n` (no subsampling) when
+`s.strategy` is `nothing`.
+"""
+get_ids(s::Sampler{<:AbstractVector},n::Int) = s.strategy
+get_ids(s::Sampler{<:Integer},n::Int) = 1:s.strategy:n
+get_ids(s::Sampler{Nothing},n::Int) = 1:n
 
 for (f,g) in zip((:get_param_ids,:get_time_ids),(:num_params,:num_times))
   @eval begin
