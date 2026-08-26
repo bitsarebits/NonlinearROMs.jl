@@ -29,7 +29,8 @@ a(μ,u,v,dΩ) = ∫( νμ(μ) * ∇(v) ⋅ ∇(u) )dΩ
 l(μ,v,dΩ) = ∫( fμ(μ) * v )dΩ
 res(μ,u,v,dΩ) = a(μ,u,v,dΩ) - l(μ,v,dΩ)
 
-test = TestFESpace(model,ReferenceFE(lagrangian,Float64,1);conformity=:H1,dirichlet_tags="boundary")
+reffe = ReferenceFE(lagrangian,Float64,1)
+test = LexicographicFESpace(model,reffe;conformity=:H1,dirichlet_tags="boundary")
 
 g(μ) = x -> 0.0
 gμ(μ) = parameterise(g,μ)
@@ -55,8 +56,9 @@ println("Input physical dims  : $D_phys")
 println("-----------------------\n")
 
 # Neural Operator Setup
-# Omitting explicit models/samplers triggers the defaults (AutoNOMAD, Identity branch sampling, CosineAnnealing)
+# 1 param -> Branch (Identity sampling), 2D coords -> Trunk
 reduction = NOMADReduction(;
+    model = NOMAD(1,D_phys),
     epochs = 2500,
     batch_size = 512,
 )

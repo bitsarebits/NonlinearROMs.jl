@@ -26,7 +26,8 @@ a(μ,u,v,dΩ) = ∫( νμ(μ) * ∇(v) ⋅ ∇(u) )dΩ
 l(μ,v,dΩ) = ∫( fμ(μ) * v )dΩ
 res(μ,u,v,dΩ) = a(μ,u,v,dΩ) - l(μ,v,dΩ)
 
-test = TestFESpace(model,ReferenceFE(lagrangian,Float64,1);conformity=:H1,dirichlet_tags="boundary")
+reffe = ReferenceFE(lagrangian,Float64,1)
+test = LexicographicFESpace(model,reffe;conformity=:H1,dirichlet_tags="boundary")
 
 g(μ) = x -> 0.0
 gμ(μ) = parameterise(g,μ)

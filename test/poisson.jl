@@ -51,7 +51,7 @@ trian_stiffness = (Ω,)
 domains = FEDomains(trian_res,trian_stiffness)
 
 reffe = ReferenceFE(lagrangian,Float64,order)
-test = TestFESpace(Ω,reffe;conformity=:H1,dirichlet_tags=[1,3,7])
+test = LexicographicFESpace(Ω,reffe;conformity=:H1,dirichlet_tags=[1,3,7])
 trial = ParamTrialFESpace(test,gμ)
 
 fesolver = LUSolver()

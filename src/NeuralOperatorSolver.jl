@@ -18,7 +18,7 @@ function RBSteady.reduced_operator(
   s::AbstractSnapshots
   )
 
-  reduction = RBSteady.get_state_reduction(solver)
+  reduction = get_state_reduction(solver)
   model,ps,st,norm_stats,max_u = train_neural_operator(reduction,feop,s)
   NeuralRBOperator(feop,model,ps,st,norm_stats,max_u)
 end
@@ -48,8 +48,8 @@ It initializes the neural network with the weights and states of the `pretrained
 
 # Examples
 ```julia
-# Define the shared architecture
-model_arch = AutoDeepONet()
+# Define the shared architecture (2 params -> Branch; 2D coords -> Trunk)
+model_arch = DeepONet(2,2)
 
 # Base Training
 base_strategy = NeuralOpStrategy(model=model_arch, epochs=5000)
@@ -76,30 +76,30 @@ function RBSteady.reduced_operator(
   update_stats::Bool = false
 )
 
-  reduction = RBSteady.get_state_reduction(solver)
+  reduction = get_state_reduction(solver)
   model,ps,st,norm_stats,max_u = train_neural_operator(reduction,feop,s,pretrained_op;update_stats=update_stats)
   NeuralRBOperator(feop,model,ps,st,norm_stats,max_u)
 end
 
 """
     reduced_operator(
-        solver::NeuralOpSolver,
-        s::AbstractSnapshots,
-        pretrained_op::NeuralRBOperator;
-        update_stats::Bool = false
+      solver::NeuralOpSolver,
+      s::AbstractSnapshots,
+      pretrained_op::NeuralRBOperator;
+      update_stats::Bool = false
     )
 
 Automatically extracts the high-fidelity operator (`feop`) from `pretrained_op.op` and invokes the main fine-tuning routine.
 """
 function RBSteady.reduced_operator(
-    solver::NeuralOpSolver,
-    s::AbstractSnapshots,
-    pretrained_op::NeuralRBOperator;
-    update_stats::Bool = false
-)
+  solver::NeuralOpSolver,
+  s::AbstractSnapshots,
+  pretrained_op::NeuralRBOperator;
+  update_stats::Bool = false
+  )
 
   feop = pretrained_op.op
-  RBSteady.reduced_operator(solver,feop,s,pretrained_op;update_stats=update_stats)
+  reduced_operator(solver,feop,s,pretrained_op;update_stats=update_stats)
 end
 
 function Algebra.solve(
@@ -112,7 +112,7 @@ function Algebra.solve(
   ps = op.model_weights
   st = op.model_states
   max_u = op.max_u
-  strategy = RBSteady.get_state_reduction(solver).strategy
+  strategy = get_state_reduction(solver).strategy
 
   branch_stats = op.norm_stats.branch
   trunk_stats = op.norm_stats.trunk
@@ -163,7 +163,7 @@ function Algebra.solve(
   ps = op.model_weights
   st = op.model_states
   max_u = op.max_u
-  strategy = RBSteady.get_state_reduction(solver).strategy
+  strategy = get_state_reduction(solver).strategy
 
   u_in_stats = op.norm_stats.u_in
   y_in_stats = op.norm_stats.y_in

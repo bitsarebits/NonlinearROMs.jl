@@ -11,19 +11,6 @@ struct NNInterpolation{A<:NeuralNetwork} <: Interpolation
   interpolation::A
 end
 
-"""
-    Interpolation(red::NNHyperReduction, basis::Projection, s::Snapshots)
-      -> NNInterpolation
-
-Offline training step for [`NNHyperReduction`](@ref):
-
-1. Runs empirical interpolation on `basis` to determine integration points
-   and the EIM matrix
-2. Solves the EIM system for each snapshot to obtain coefficient vectors
-3. Trains a [`NeuralNetwork`](@ref) via `red.strategy` on the `(parameter, coefficient)` pairs
-
-Returns an [`NNInterpolation`](@ref) ready for online use.
-"""
 function RBSteady.Interpolation(
   red::NNHyperReduction,
   a::Projection,

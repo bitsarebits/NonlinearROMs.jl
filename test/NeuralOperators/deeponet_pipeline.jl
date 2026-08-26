@@ -10,13 +10,15 @@ using GridapROMs.DofMaps
 using NonlinearROMs
 using LinearAlgebra
 
-# Mock operators
+# Mock quantities
+const MockModel = CartesianDiscreteModel((0.0,1.0),(2,))
+const MockReffe = ReferenceFE(lagrangian,Float64,1)
+
 struct MockSteadyOpDON <: ParamOperator{LinearParamEq,JointDomains} end
-Gridap.FESpaces.get_test(::MockSteadyOpDON) = FESpace(CartesianDiscreteModel((0.0,1.0),(2,)),ReferenceFE(lagrangian,Float64,1))
+Gridap.FESpaces.get_test(::MockSteadyOpDON) = LexicographicFESpace(MockModel,MockReffe)
 
 struct MockTransientOpDON <: ParamOperator{LinearParamODE,JointDomains} end
-Gridap.FESpaces.get_test(::MockTransientOpDON) = FESpace(CartesianDiscreteModel((0.0,1.0),(2,)),ReferenceFE(lagrangian,Float64,1))
-
+Gridap.FESpaces.get_test(::MockTransientOpDON) = LexicographicFESpace(MockModel,MockReffe)
 
 @testset "DeepONet Steady Integration Pipeline" begin
   feop = MockSteadyOpDON()
@@ -34,7 +36,7 @@ Gridap.FESpaces.get_test(::MockTransientOpDON) = FESpace(CartesianDiscreteModel(
 
   # Strategy and Solver
   strategy = NeuralOpStrategy(
-    model = AutoDeepONet(width=8,depth=1),
+    model = DeepONet(2,1;width=8,depth=1),
     epochs = 2,
     batch_size = 2,
     lr_scheduler = CosineAnnealing(2,lr_max=0.01f0,lr_min=0.001f0),
@@ -71,8 +73,8 @@ end
   u_data = rand(Float64,N_dofs,n_samples,N_time)
   snaps = Snapshots(ConsecutiveParamArray(u_data),VectorDofMap(N_dofs),r)
 
-  # Solver Transient
-  strategy = NeuralOpStrategy(model=AutoDeepONet(width=8,depth=1),epochs=1,verbose=false)
+  # Solver Transient (trunk input is 1D coords + time = 2)
+  strategy = NeuralOpStrategy(model=DeepONet(2,2;width=8,depth=1),epochs=1,verbose=false)
   reduction = DeepONetReduction(strategy)
   solver = NeuralOpSolver(LUSolver(),reduction)
 
@@ -93,7 +95,7 @@ end
   snaps = Snapshots(ConsecutiveParamArray(u_data),VectorDofMap(3),Realisation([rand(2) for _ in 1:4]))
   
   # Setup solver
-  strategy = NeuralOpStrategy(model=AutoDeepONet(width=8,depth=1),epochs=1,verbose=false)
+  strategy = NeuralOpStrategy(model=DeepONet(2,1;width=8,depth=1),epochs=1,verbose=false)
   reduction = DeepONetReduction(strategy)
   solver = NeuralOpSolver(LUSolver(),reduction)
 
@@ -113,7 +115,7 @@ end
     
     # Base training with 2 sensors/parameters
     snaps_base = Snapshots(ConsecutiveParamArray(rand(Float64,3,2)),VectorDofMap(3),Realisation([rand(Float32,2) for _ in 1:2]))
-    strategy = NeuralOpStrategy(model=AutoDeepONet(width=4,depth=1),epochs=1,verbose=false)
+    strategy = NeuralOpStrategy(model=DeepONet(2,1;width=4,depth=1),epochs=1,verbose=false)
     solver = NeuralOpSolver(LUSolver(),DeepONetReduction(strategy))
     
     pretrained_op = reduced_operator(solver,feop,snaps_base)

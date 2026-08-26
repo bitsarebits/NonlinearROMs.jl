@@ -15,35 +15,6 @@ function compute_zscore_stats(data::AbstractMatrix)
   return (μ=Float32.(μ),σ=Float32.(σ))
 end
 
-resolve_model(model::DeepONet,n_branch_in::Int,n_trunk_in::Int) = model
-
-function resolve_model(config::AutoDeepONet,n_branch_in::Int,n_trunk_in::Int)
-  # Generating hidden layers (ex. 3 layer of 64)
-  hidden = ntuple(_ -> config.width,config.depth)
-
-  # Last layer of Branch and Trunk nets must have same dimension (width) for dot product
-  branch_layers = (n_branch_in,hidden...,config.width)
-  trunk_layers  = (n_trunk_in,hidden...,config.width)
-
-  DeepONet(branch_layers,trunk_layers,config.activation)
-end
-
-resolve_model(model::NOMAD,n_sensors_in::Int,n_coords_in::Int) = model
-
-# Resolve AutoNOMAD dimensions with symmetric sub-networks
-function resolve_model(config::AutoNOMAD,n_sensors_in::Int,n_coords_in::Int)
-  # Shared hidden layer structure
-  hidden = ntuple(_ -> config.width,config.depth)
-
-  # Approximator: from n_sensors_in to a latent space of size 'width'
-  approximator_layers = (n_sensors_in,hidden...,config.width)
-
-  # Decoder: from (latent space + n_coords_in) to 1 (scalar output)
-  decoder_layers = (config.width + n_coords_in,hidden...,1)
-
-  NOMAD(approximator_layers,decoder_layers,config.activation)
-end
-
 """
     get_coords_with_order(V::SingleFieldFESpace) -> Matrix{Float32}
 
@@ -248,10 +219,6 @@ function train_neural_operator(
   x_train_full = get_coords_with_order(V) # shape: (D_phys,full_N_dofs)
   x_train = x_train_full[:,idx_x]
 
-  # Data dimension
-  n_branch_in = size(params_matrix,1)
-  n_trunk_in  = size(x_train,1)
-
   # Input normalization
   branch_stats = compute_zscore_stats(params_matrix)
   params_matrix = (params_matrix .- branch_stats.μ) ./ branch_stats.σ
@@ -259,10 +226,8 @@ function train_neural_operator(
   trunk_stats = compute_zscore_stats(x_train)
   x_train = (x_train .- trunk_stats.μ) ./ trunk_stats.σ
 
-
   # Building the DeepONet
-  model_def = resolve_model(strategy.model,n_branch_in,n_trunk_in)
-  deepONet = build_model(model_def)
+  deepONet = build_model(strategy.model)
 
   # Dataloader and setup
   bs = resolve_batch_size(strategy.batch_size,n_samples)
@@ -446,8 +411,7 @@ function train_neural_operator(
   y_in = (y_in .- y_in_stats.μ) ./ y_in_stats.σ
 
   # Building the NOMAD model
-  model_def = resolve_model(strategy.model,n_sensors,D_phys)
-  nomad_net = build_model(model_def)
+  nomad_net = build_model(strategy.model)
 
   # DataLoader and Lux setup
   bs = resolve_batch_size(strategy.batch_size,N_tot)

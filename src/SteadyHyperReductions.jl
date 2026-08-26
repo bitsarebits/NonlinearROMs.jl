@@ -9,7 +9,7 @@ function FESpaces.interpolate!(
 
   o = one(eltype2(b̂))
   x = matrix_of_params(r)
-  i = RBSteady.get_interpolation(a)
+  i = get_interpolation(a)
   coeff = ConsecutiveParamArray(evaluate!(cache,i.interpolation,x))
   mul!(b̂,a,coeff,o,o)
   return b̂
@@ -91,9 +91,9 @@ function RBSteady.HRProjection(
   test::RBSpace
   )
 
-  basis = projection(RBSteady.get_reduction(red),s)
+  basis = projection(get_reduction(red),s)
   proj_basis = project(test,basis)
-  interp = RBSteady.Interpolation(red,basis,s)
+  interp = Interpolation(red,basis,s)
   return HRProjection(proj_basis,red,interp)
 end
 
@@ -105,9 +105,9 @@ function RBSteady.HRProjection(
   test::RBSpace
   )
 
-  basis = projection(RBSteady.get_reduction(red),s)
+  basis = projection(get_reduction(red),s)
   proj_basis = project(test,basis,trial)
-  interp = RBSteady.Interpolation(red,basis,s)
+  interp = Interpolation(red,basis,s)
   return HRProjection(proj_basis,red,interp)
 end
 
@@ -118,7 +118,7 @@ end
 
 function RBSteady.allocate_coefficient(a::NNHRProjection{<:Projection,<:NNHyperReduction},r::AbstractRealisation)
   x = matrix_of_params(r)
-  i = RBSteady.get_interpolation(a)
+  i = get_interpolation(a)
   return_cache(i.interpolation,x)
 end
 
@@ -127,13 +127,13 @@ end
 const NNContribution = AffineContribution{<:NNHRProjection}
 
 function RBSteady.allocate_coefficient(a::NNContribution,args...)
-  RBSteady.allocate_coefficient(first(get_contributions(a)),args...)
+  allocate_coefficient(first(get_contributions(a)),args...)
 end
 
 function RBSteady.allocate_hypred_cache(a::NNContribution,args...)
-  fecache = RBSteady.allocate_coefficient(a,args...)
+  fecache = allocate_coefficient(a,args...)
   coeffs = fecache
-  hypred = RBSteady.allocate_hyper_reduction(a,args...)
+  hypred = allocate_hyper_reduction(a,args...)
   return HRParamArray(fecache,coeffs,hypred)
 end
 
@@ -157,11 +157,11 @@ function RBSteady.allocate_coefficient(
   ) where N
 
   i0 = findfirst(a.touched)
-  A = typeof(RBSteady.allocate_coefficient(a.array[i0],r))
+  A = typeof(allocate_coefficient(a.array[i0],r))
   block_cache = Array{A,N}(undef,size(a))
   for i in eachindex(a)
     if a.touched[i]
-      block_cache[i] = RBSteady.allocate_coefficient(a.array[i],r)
+      block_cache[i] = allocate_coefficient(a.array[i],r)
     end
   end
   return ArrayBlock(block_cache,a.touched)

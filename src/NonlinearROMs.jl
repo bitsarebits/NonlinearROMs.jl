@@ -58,6 +58,10 @@ using GridapROMs.RBSteady
 using GridapROMs.RBTransient
 using GridapROMs.Utils
 
+import GridapROMs.RBSteady: 
+  GlobalRBSolver,GlobalContext,get_reduction,get_state_reduction,get_interpolation,
+  allocate_coefficient,allocate_hyper_reduction,allocate_hypred_cache
+
 export NNType
 export GenericNNType
 export MLPType
@@ -117,12 +121,8 @@ include("LRSchedulers.jl")
 export TrainingLog
 include("TrainingLogs.jl")
 
-export AbstractDeepONet
-export AbstractNOMAD
 export DeepONet
-export AutoDeepONet
 export NOMAD
-export AutoNOMAD
 include("NeuralOperatorModels.jl")
 
 export NeuralOpStrategy
@@ -142,7 +142,6 @@ export XDEV
 export CDEV
 export build_model
 export compute_zscore_stats
-export resolve_model
 include("NeuralOperatorTraining.jl")
 include("TransientNeuralOperatorTraining.jl")
 

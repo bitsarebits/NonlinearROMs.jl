@@ -36,9 +36,9 @@ function RBSteady.HRProjection(
   test::RBSpace
   )
 
-  basis = projection(RBSteady.get_reduction(red),s)
+  basis = projection(get_reduction(red),s)
   proj_basis = project(test,basis)
-  interp = RBSteady.Interpolation(red,basis,s)
+  interp = Interpolation(red,basis,s)
   return HRProjection(proj_basis,red,interp)
 end
 
@@ -50,9 +50,9 @@ function RBSteady.HRProjection(
   test::RBSpace
   )
 
-  basis = projection(RBSteady.get_reduction(red),s)
+  basis = projection(get_reduction(red),s)
   proj_basis = project(test,basis,trial,get_time_combination(red))
-  interp = RBSteady.Interpolation(red,basis,s)
+  interp = Interpolation(red,basis,s)
   return HRProjection(proj_basis,red,interp)
 end
 

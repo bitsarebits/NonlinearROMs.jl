@@ -67,24 +67,24 @@ end
 end
 
 @testset "Model Resolution and Arch Building" begin
-  # AutoDeepONet
-  config_don = AutoDeepONet(width=32,depth=2)
-  model_don = resolve_model(config_don,5,2)
+  # DeepONet: auto-sized from input dims
+  model_don = DeepONet(5,2;width=32,depth=2)
   @test model_don.branch_layers == (5,32,32,32)
   @test model_don.trunk_layers == (2,32,32,32)
 
-  # AutoNOMAD
-  config_nomad = AutoNOMAD(width=64,depth=3)
-  model_nomad = resolve_model(config_nomad,10,3)
+  # NOMAD: auto-sized from input dims
+  model_nomad = NOMAD(10,3;width=64,depth=3)
   @test model_nomad.approximator_layers == (10,64,64,64,64)
   @test model_nomad.decoder_layers == (67,64,64,64,1)
 
-  # Explicit Models dispatch
+  # Explicit layer construction
   explicit_don = DeepONet(branch_layers=(5,10),trunk_layers=(2,10),activation=tanh)
-  @test resolve_model(explicit_don,5,2) === explicit_don
+  @test explicit_don.branch_layers == (5,10)
+  @test explicit_don.trunk_layers == (2,10)
 
   explicit_nomad = NOMAD(approximator_layers=(10,10),decoder_layers=(13,1),activation=tanh)
-  @test resolve_model(explicit_nomad,10,3) === explicit_nomad
+  @test explicit_nomad.approximator_layers == (10,10)
+  @test explicit_nomad.decoder_layers == (13,1)
 
   # build_lux_chain
   chain = NonlinearROMs.build_lux_chain((2,10,10,1),tanh)

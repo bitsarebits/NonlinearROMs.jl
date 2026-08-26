@@ -63,10 +63,6 @@ function train_neural_operator(
     end
   end
 
-  # Data dimension
-  n_branch_in = size(params_matrix,1)
-  n_trunk_in  = size(x_train,1)
-
   # Normalization
   max_u = maximum(abs.(u_train))
   u_train ./= max_u
@@ -79,8 +75,7 @@ function train_neural_operator(
 
   # DeepONet architecture
   # Input of the Trunk Net is D_phys + 1
-  model_def = resolve_model(strategy.model,n_branch_in,n_trunk_in)
-  deepONet = build_model(model_def)
+  deepONet = build_model(strategy.model)
 
   # Dataloader and Lux setup
   bs = resolve_batch_size(strategy.batch_size,n_samples)
@@ -308,8 +303,7 @@ function train_neural_operator(
 
   # Building the NOMAD model
   # The network input is: sensors + (physical coordinates + 1 for time)
-  model_def = resolve_model(strategy.model,n_sensors,D_phys + 1)
-  nomad_net = build_model(model_def)
+  nomad_net = build_model(strategy.model)
 
   # Dataloader and Lux setup
   bs = resolve_batch_size(strategy.batch_size,N_tot)

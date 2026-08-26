@@ -28,7 +28,8 @@ u(σ,t) = x -> (1 / √(2 * π * σ[1])) * exp(-(x[1] - c * t)^2 / (2 * σ[1]))
 uₚₜ(σ,t) = parameterise(u,σ,t)
 u₀ₚ(σ) = parameterise(u₀,σ)
 
-test = TestFESpace(model,ReferenceFE(lagrangian,Float64,1))
+reffe = ReferenceFE(lagrangian,Float64,1)
+test = LexicographicFESpace(model,reffe)
 trial = TransientTrialParamFESpace(test,uₚₜ)
 
 m(σ,t,du,v) = ∫(v * du)dΩ
@@ -44,7 +45,7 @@ n_base = 50 # Increased base samples
 uh₀ₚ_base(σ) = interpolate_everywhere(u₀ₚ(σ),trial(σ,t0))
 s_base,_ = solution_snapshots(fesolver,feop_base,σ_base,uh₀ₚ_base)
 
-model_arch = AutoDeepONet(width=128,depth=4,activation=Lux.gelu) # High capacity
+model_arch = DeepONet(1,2;width=128,depth=4,activation=Lux.gelu) # High capacity; 1 param -> Branch, 1D coords + time -> Trunk
 
 # Neural Setup (Log transform + Space-Time subsampling)
 strategy_base = NeuralOpStrategy(

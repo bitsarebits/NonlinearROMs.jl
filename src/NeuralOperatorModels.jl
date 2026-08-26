@@ -1,8 +1,5 @@
-abstract type AbstractDeepONet end
-abstract type AbstractNOMAD end
-
 """
-    struct DeepONet{F} <: AbstractDeepONet
+    struct DeepONet{F} <: NeuralNetwork
       branch_layers::Tuple{Vararg{Int}}
       trunk_layers::Tuple{Vararg{Int}}
       activation::F
@@ -30,7 +27,7 @@ model = DeepONet(
 )
 ```
 """
-struct DeepONet{F} <: AbstractDeepONet
+struct DeepONet{F} <: NeuralNetwork
   branch_layers::Tuple{Vararg{Int}}
   trunk_layers::Tuple{Vararg{Int}}
   activation::F
@@ -40,41 +37,22 @@ function DeepONet(;branch_layers,trunk_layers,activation=tanh)
   DeepONet(Tuple(branch_layers),Tuple(trunk_layers),activation)
 end
 
-"""
-    Base.@kwdef struct AutoDeepONet{F} <: AbstractDeepONet
-      width::Int = 64
-      depth::Int = 3
-      activation::F = tanh
-    end
+function DeepONet(
+  nbranch_in::Int,
+  ntrunk_in::Int;
+  width::Int=64,
+  depth::Int=3,
+  hidden = ntuple(_ -> width,depth),
+  branch_layers=(nbranch_in,hidden...,width),
+  trunk_layers=(ntrunk_in,hidden...,width),
+  activation=tanh
+  )
 
-Automatic builder for DeepONet architectures.
-It automatically infers the correct input dimensions for the Branch and Trunk networks based on the problem's physical dimensions and the parameter space.
-
-# Fields
-- `width::Int`: The number of neurons in each hidden layer, as well as the dimension of the final latent output \$p\$ (default: 64).
-- `depth::Int`: The number of hidden layers for both the Branch and Trunk networks (default: 3).
-- `activation::F`: The activation function applied to hidden layers (default: `tanh`).
-
-# Examples
-
-```julia
-using Lux
-
-# Default architecture
-model = AutoDeepONet()
-
-# Custom hyperparameters via keyword arguments
-model = AutoDeepONet(width = 128, depth = 4, activation = Lux.gelu)
-```
-"""
-Base.@kwdef struct AutoDeepONet{F} <: AbstractDeepONet
-  width::Int = 64
-  depth::Int = 3
-  activation::F = tanh
+  DeepONet(Tuple(branch_layers),Tuple(trunk_layers),activation)
 end
 
 """
-    struct NOMAD{F} <: AbstractNOMAD
+    struct NOMAD{F} <: NeuralNetwork
       approximator_layers::Tuple{Vararg{Int}}
       decoder_layers::Tuple{Vararg{Int}}
       activation::F
@@ -95,45 +73,26 @@ model = NOMAD(
 )
 ```
 """
-struct NOMAD{F} <: AbstractNOMAD
+struct NOMAD{F} <: NeuralNetwork
   approximator_layers::Tuple{Vararg{Int}}
   decoder_layers::Tuple{Vararg{Int}}
   activation::F
 end
 
-function NOMAD(; approximator_layers, decoder_layers, activation=tanh)
-  NOMAD(Tuple(approximator_layers), Tuple(decoder_layers), activation)
+function NOMAD(;approximator_layers,decoder_layers,activation=tanh)
+  NOMAD(Tuple(approximator_layers),Tuple(decoder_layers),activation)
 end
 
-"""
-    Base.@kwdef struct AutoNOMAD{F} <: AbstractNOMAD
-      width::Int = 64
-      depth::Int = 3
-      activation::F = tanh
-    end
+function NOMAD(
+  nsensors_in::Int,
+  ncoords_in::Int;
+  width::Int=64,
+  depth::Int=3,
+  hidden = ntuple(_ -> width,depth),
+  approximator_layers=(nsensors_in,hidden...,width),
+  decoder_layers=(width+ncoords_in,hidden...,1),
+  activation=tanh
+  )
 
-Automatic builder for NOMAD architectures.
-Automatically infers the correct input dimensions for sensors and coordinates based on the physical problem.
-
-# Fields
-- `width::Int`: The dimension of the latent space and the number of neurons in the hidden layers (default: 64).
-- `depth::Int`: The number of hidden layers for both the Approximator and the Decoder (default: 3).
-- `activation::F`: The activation function applied to hidden layers (default: tanh).
-
-# Examples
-
-```julia
-using Lux
-
-# Default architecture
-model = AutoNOMAD()
-
-# Custom hyperparameters via keyword arguments
-model = AutoNOMAD(width = 128, depth = 4, activation = Lux.gelu)
-```
-"""
-Base.@kwdef struct AutoNOMAD{F} <: AbstractNOMAD
-  width::Int = 64
-  depth::Int = 3
-  activation::F = tanh
+  NOMAD(Tuple(approximator_layers),Tuple(decoder_layers),activation)
 end

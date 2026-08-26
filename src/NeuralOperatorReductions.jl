@@ -16,7 +16,11 @@ neural architecture, the training hyperparameters, and the data subsampling
 strategies for the offline phase.
 
 # Fields
-- `model`: The neural network architecture builder (e.g., `AutoDeepONet()`, `AutoNOMAD()` for default architectures).
+- `model`: A [`DeepONet`](@ref) or [`NOMAD`](@ref) architecture. Build one either with
+  explicit `branch_layers`/`trunk_layers` (or `approximator_layers`/`decoder_layers`), or
+  via the convenience `DeepONet(nbranch_in, ntrunk_in; width, depth, activation)` /
+  `NOMAD(nsensors_in, ncoords_in; width, depth, activation)` constructors, which build a
+  uniform stack of `depth` hidden layers of `width` neurons from the given input dimensions.
 - `epochs::Int`: Total number of training epochs. Default: `20000`.
 - `batch_size::Int`: The batch size for training. If set to `0` or a negative value, it defaults to the total number of available samples (full-batch). Default: `0`.
 - `step_x::Int`: Spatial subsampling step. Extracts 1 DoF every `step_x` for the Trunk/Coordinate inputs. Useful for reducing memory footprints in dense meshes. Default: `1`.
@@ -37,7 +41,7 @@ strategies for the offline phase.
 using Lux
 
 strategy = NeuralOpStrategy(
-  model = AutoDeepONet(width=64, depth=3, activation=Lux.gelu),
+  model = DeepONet(2, 2; width=64, depth=3, activation=Lux.gelu), # 2 params -> Branch; 2D coords -> Trunk
   epochs = 5000,
   batch_size = 32,
   step_x = 2, # Use half of the spatial DoFs for training
@@ -49,7 +53,7 @@ strategy = NeuralOpStrategy(
 ```julia
 # Log-transform for parameters spanning huge ranges (e.g., 1e-(beta) with beta = 1:0.2:5)
 strategy_log = NeuralOpStrategy(
-  model = AutoDeepONet(),
+  model = DeepONet(2, 3; width=64, depth=3), # 2 params -> Branch; 3D coords -> Trunk
   branch_sampler = p -> log10.(p)
 )
 
@@ -78,7 +82,7 @@ branch_sampler_func = (p) -> begin
 end
 
 strategy_multi = NeuralOpStrategy(
-  model = AutoDeepONet(),
+  model = DeepONet(300, 1; width=64, depth=3), # 300 concatenated sensors -> Branch; 1D coords -> Trunk
   branch_sampler = branch_sampler_func
 )
 ```
@@ -101,65 +105,86 @@ end
 
 RBSteady.ReductionStyle(r::NeuralOpReduction) = NoReductionStyle()
 RBSteady.NormStyle(r::NeuralOpReduction) = EuclideanNorm()
-ParamDataStructures.num_params(r::NeuralOpReduction) = 1 # Dummy value
 get_strategy(r::NeuralOpReduction) = r.strategy
 
 """
-    const DeepONetReduction{M<:AbstractDeepONet,S} = NeuralOpReduction{M,S}
+    const DeepONetReduction{M<:DeepONet,S} = NeuralOpReduction{M,S}
 
 A reduction wrapper for the Deep Operator Network (DeepONet) strategy.
 It instructs the ROM solvers to use the DeepONet pipeline during the offline and online phases.
 
 # Constructors
 - `DeepONetReduction(s::NeuralOpStrategy)`: Wraps an explicitly defined strategy.
-- `DeepONetReduction(; model = AutoDeepONet(), kwargs...)`: Automatically builds the strategy forwarding the keyword arguments.
+- `DeepONetReduction(; model::DeepONet, kwargs...)`: Automatically builds the strategy, forwarding the training-hyperparameter keyword arguments to [`NeuralOpStrategy`](@ref).
 
 # Examples
 ```julia
 # Using an explicit strategy
-strategy = NeuralOpStrategy(model=AutoDeepONet(), epochs=1000)
+strategy = NeuralOpStrategy(model=DeepONet(2,3;width=64,depth=3), epochs=1000)
 reduction = DeepONetReduction(strategy)
 
 # Using kwargs directly
-reduction = DeepONetReduction(model=AutoDeepONet(), epochs=1000, batch_size=32)
+reduction = DeepONetReduction(model=DeepONet(2,3;width=64,depth=3), epochs=1000, batch_size=32)
 ```
 """
-const DeepONetReduction{M<:AbstractDeepONet,S} = NeuralOpReduction{M,S}
-
-DeepONetReduction(s::NeuralOpStrategy{<:AbstractDeepONet}) = NeuralOpReduction(s)
-function DeepONetReduction(;model = AutoDeepONet(),kwargs...)
-  NeuralOpReduction(NeuralOpStrategy(;model=model,kwargs...))
-end
+const DeepONetReduction{M<:DeepONet,S} = NeuralOpReduction{M,S}
 
 """
-    const NOMADReduction{M<:AbstractNOMAD,S} = NeuralOpReduction{M,S}
+    const NOMADReduction{M<:NOMAD,S} = NeuralOpReduction{M,S}
 
 A reduction wrapper for the NOMAD (Non-linear Manifold Decoder) neural operator strategy.
 It instructs the ROM solvers to use the NOMAD pipeline during the offline and online phases.
 
 # Constructors
 - `NOMADReduction(s::NeuralOpStrategy)`: Wraps an explicitly defined strategy.
-- `NOMADReduction(; model = AutoNOMAD(), kwargs...)`: Automatically builds the strategy forwarding the keyword arguments.
+- `NOMADReduction(; model::NOMAD, kwargs...)`: Automatically builds the strategy, forwarding the training-hyperparameter keyword arguments to [`NeuralOpStrategy`](@ref).
 
 # Examples
 ```julia
 # Using an explicit strategy
-strategy = NeuralOpStrategy(model=AutoNOMAD(), epochs=1000)
+strategy = NeuralOpStrategy(model=NOMAD(2,3;width=32,depth=2), epochs=1000)
 reduction = NOMADReduction(strategy)
 
 # Using kwargs directly
-reduction = NOMADReduction(model=AutoNOMAD(width=32, depth=2), epochs=1000)
+reduction = NOMADReduction(model=NOMAD(2,3;width=32,depth=2), epochs=1000)
 ```
 """
-const NOMADReduction{M<:AbstractNOMAD,S} = NeuralOpReduction{M,S}
+const NOMADReduction{M<:NOMAD,S} = NeuralOpReduction{M,S}
 
-NOMADReduction(s::NeuralOpStrategy{<:AbstractNOMAD}) = NeuralOpReduction(s)
-function NOMADReduction(;model = AutoNOMAD(),kwargs...)
-  NeuralOpReduction(NeuralOpStrategy(;model=model,kwargs...))
+for (f,m) in ((:DeepONetReduction,:DeepONet),(:NOMADReduction,:NOMAD))
+  @eval begin
+    $f(s::NeuralOpStrategy{<:$m}) = NeuralOpReduction(s)
+
+    function $f(;
+      model::$m,
+      epochs::Int=20000,
+      batch_size::Int=0,
+      step_x::Int=1,
+      step_t::Int=1,
+      branch_sampler::Function=identity,
+      lr_scheduler=CosineAnnealing(epochs),
+      verbose::Bool=true,
+      print_every::Int=500,
+      )
+
+      strategy = NeuralOpStrategy(
+        model=model,
+        epochs=epochs,
+        batch_size=batch_size,
+        step_x=step_x,
+        step_t=step_t,
+        branch_sampler=branch_sampler,
+        lr_scheduler=lr_scheduler,
+        verbose=verbose,
+        print_every=print_every
+      )
+      NeuralOpReduction(strategy)
+    end
+  end
 end
 
 """
-    const NeuralOpSolver{A,C<:NeuralOpReduction} = RBSteady.GlobalRBSolver{A,C,Nothing,Nothing}
+    const NeuralOpSolver{A,C<:NeuralOpReduction} = GlobalRBSolver{A,C,Nothing,Nothing}
 
     NeuralOpSolver(fesolver::GridapType, reduction::NeuralOpReduction)
 
@@ -173,25 +198,25 @@ Initializes the Reduced Basis Solver for Neural Operators.
 
 **Minimal Default Initialization:**
 ```julia
-# Uses AutoDeepONet with default hyperparameters (20000 epochs, full-batch, etc.)
-solver = NeuralOpSolver(LUSolver(), DeepONetReduction())
+# Default hyperparameters (20000 epochs, full-batch, etc.), 2 params -> Branch, 2D coords -> Trunk
+solver = NeuralOpSolver(LUSolver(), DeepONetReduction(model=DeepONet(2,2)))
 ```
 **Custom Initialization:**
 ```julia
 using Lux
 
 strategy = NeuralOpStrategy(
-  model = AutoDeepONet(width=128, depth=4, activation=Lux.gelu),
+  model = DeepONet(2, 2; width=128, depth=4, activation=Lux.gelu),
   epochs = 1000
 )
 reduction = DeepONetReduction(strategy)
 solver = NeuralOpSolver(ThetaMethod(LUSolver(), dt, θ), reduction)
 ```
 """
-const NeuralOpSolver{A,C<:NeuralOpReduction} = RBSteady.GlobalRBSolver{A,C,Nothing,Nothing}
+const NeuralOpSolver{A,C<:NeuralOpReduction} = GlobalRBSolver{A,C,Nothing,Nothing}
 
 function NeuralOpSolver(fesolver,reduction::NeuralOpReduction)
-  RBSolver(fesolver,RBSteady.GlobalContext(),reduction,nothing,nothing)
+  RBSolver(fesolver,GlobalContext(),reduction,nothing,nothing)
 end
 
 """

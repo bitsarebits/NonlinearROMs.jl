@@ -16,7 +16,7 @@ function RBSteady.reduced_operator(
   s::AbstractSnapshots
   )
 
-  reduction = RBSteady.get_state_reduction(solver)
+  reduction = get_state_reduction(solver)
   model,ps,st,norm_stats,max_u = train_neural_operator(reduction,feop,s)
   NeuralRBOperator(feop,model,ps,st,norm_stats,max_u)
 end
@@ -42,7 +42,7 @@ function RBSteady.reduced_operator(
   update_stats::Bool = false
 )
 
-  reduction = RBSteady.get_state_reduction(solver)
+  reduction = get_state_reduction(solver)
   model,ps,st,norm_stats,max_u = train_neural_operator(reduction,feop,s,pretrained_op;update_stats=update_stats)
   NeuralRBOperator(feop,model,ps,st,norm_stats,max_u)
 end
@@ -58,7 +58,7 @@ function Algebra.solve(
   ps = op.model_weights
   st = op.model_states
   max_u = op.max_u
-  strategy = RBSteady.get_state_reduction(solver).strategy
+  strategy = get_state_reduction(solver).strategy
 
   branch_stats = op.norm_stats.branch
   trunk_stats = op.norm_stats.trunk
@@ -140,7 +140,7 @@ function Algebra.solve(
   ps = op.model_weights
   st = op.model_states
   max_u = op.max_u
-  strategy = RBSteady.get_state_reduction(solver).strategy
+  strategy = get_state_reduction(solver).strategy
 
   u_in_stats = op.norm_stats.u_in
   y_in_stats = op.norm_stats.y_in
