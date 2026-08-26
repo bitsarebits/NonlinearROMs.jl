@@ -84,7 +84,6 @@ export decode
 export infer_latent
 include("NeuralNetworks.jl")
 
-export get_strategy
 export NNOperatorReduction
 export NNHyperReduction
 include("SteadyReductions.jl")

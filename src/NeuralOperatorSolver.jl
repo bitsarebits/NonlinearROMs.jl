@@ -61,7 +61,7 @@ ft_strategy = NeuralOpStrategy(
   model = model_arch, # match the pretrained one
   epochs = 1000,
   lr_scheduler = CosineAnnealing(1000, lr_max=1e-5) # Smaller LR
-)
+  )
 solver_ft = NeuralOpSolver(LUSolver(), DeepONetReduction(ft_strategy))
 
 # Continual learning (inherits original stats)
@@ -74,7 +74,7 @@ function RBSteady.reduced_operator(
   s::AbstractSnapshots,
   pretrained_op::NeuralRBOperator;
   update_stats::Bool = false
-)
+  )
 
   reduction = get_state_reduction(solver)
   model,ps,st,norm_stats,max_u = train_neural_operator(reduction,feop,s,pretrained_op;update_stats=update_stats)
@@ -103,16 +103,16 @@ function RBSteady.reduced_operator(
 end
 
 function Algebra.solve(
-  solver::NeuralOpSolver{<:Any,<:DeepONetReduction},
+  solver::NeuralOpSolver{A,<:DeepONetReduction},
   op::NeuralRBOperator,
   r::Realisation
-  )
+  ) where A
 
   deepONet = op.model
   ps = op.model_weights
   st = op.model_states
   max_u = op.max_u
-  strategy = get_state_reduction(solver).strategy
+  strategy = get_state_reduction(solver) |> get_strategy
 
   branch_stats = op.norm_stats.branch
   trunk_stats = op.norm_stats.trunk
@@ -121,16 +121,18 @@ function Algebra.solve(
   raw_params = Float32.(matrix_of_params(r))
   n_samples = size(raw_params,2)
 
-  f_in_list = [Float32.(strategy.branch_sampler(raw_params[:,i])) for i in 1:n_samples]
-  params_matrix = reduce(hcat,f_in_list)
-
-  f_in = (params_matrix .- branch_stats.μ) ./ branch_stats.σ
+  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
+  params_matrix .-= branch_stats.μ
+  params_matrix ./= branch_stats.σ
+  f_in = params_matrix
 
   # Trunk Input (Coordinates extraction)
   V = get_test(op.op)
 
   x_test = get_coords_with_order(V)
-  x_in = (x_test .- trunk_stats.μ) ./ trunk_stats.σ
+  x_test .-= trunk_stats.μ
+  x_test ./= trunk_stats.σ
+  x_in = x_test
 
   # Inference Execution
   t = @timed begin
@@ -154,16 +156,16 @@ function Algebra.solve(
 end
 
 function Algebra.solve(
-  solver::NeuralOpSolver{<:Any,<:NOMADReduction},
+  solver::NeuralOpSolver{A,<:NOMADReduction},
   op::NeuralRBOperator,
   r::Realisation
-  )
+  ) where A
 
   nomad_net = op.model
   ps = op.model_weights
   st = op.model_states
   max_u = op.max_u
-  strategy = get_state_reduction(solver).strategy
+  strategy = get_state_reduction(solver) |> get_strategy
 
   u_in_stats = op.norm_stats.u_in
   y_in_stats = op.norm_stats.y_in
@@ -172,8 +174,7 @@ function Algebra.solve(
   raw_params = Float32.(matrix_of_params(r))
   n_samples = size(raw_params,2)
 
-  f_in_list = [Float32.(strategy.branch_sampler(raw_params[:,i])) for i in 1:n_samples]
-  params_matrix = reduce(hcat,f_in_list)
+  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
   n_sensors = size(params_matrix,1)
 
   # Coordinates extraction
@@ -188,7 +189,7 @@ function Algebra.solve(
   y_in = zeros(Float32,D_phys,N_tot)
 
   col = 1
-  for sample_idx in 1:n_samples
+  @views for sample_idx in 1:n_samples
     sensor_vals = params_matrix[:,sample_idx]
     for x_idx in 1:N_dofs
       u_in[:,col] .= sensor_vals
@@ -198,8 +199,10 @@ function Algebra.solve(
   end
 
   # Normalization
-  u_in = (u_in .- u_in_stats.μ) ./ u_in_stats.σ
-  y_in = (y_in .- y_in_stats.μ) ./ y_in_stats.σ
+  u_in .-= u_in_stats.μ
+  u_in ./= u_in_stats.σ
+  y_in .-= y_in_stats.μ
+  y_in ./= y_in_stats.σ
 
   # Inference
   t = @timed begin

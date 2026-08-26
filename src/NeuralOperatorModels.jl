@@ -22,9 +22,9 @@ The layers are defined as standard Julia tuples.
 # Trunk Net: 3 inputs (e.g., 2D space + time) -> 64 hidden -> 32 output
 model = DeepONet(
   branch_layers = (2, 64, 32),
-  trunk_layers  = (3, 64, 32),
-  activation    = relu
-)
+  trunk_layers = (3, 64, 32),
+  activation = relu
+  )
 ```
 """
 struct DeepONet{F} <: NeuralNetwork
@@ -68,9 +68,9 @@ The layers are defined as standard Julia tuples.
 # Decoder: 19 inputs (16 latent + 3 spatial coords) -> 32 hidden -> 1 output
 model = NOMAD(
   approximator_layers = (5, 32, 16),
-  decoder_layers      = (19, 32, 1),
-  activation          = relu
-)
+  decoder_layers = (19, 32, 1),
+  activation = relu
+  )
 ```
 """
 struct NOMAD{F} <: NeuralNetwork

@@ -40,7 +40,7 @@ function RBSteady.reduced_operator(
   s::AbstractSnapshots,
   pretrained_op::NeuralRBOperator;
   update_stats::Bool = false
-)
+  )
 
   reduction = get_state_reduction(solver)
   model,ps,st,norm_stats,max_u = train_neural_operator(reduction,feop,s,pretrained_op;update_stats=update_stats)
@@ -58,7 +58,7 @@ function Algebra.solve(
   ps = op.model_weights
   st = op.model_states
   max_u = op.max_u
-  strategy = get_state_reduction(solver).strategy
+  strategy = get_state_reduction(solver) |> get_strategy
 
   branch_stats = op.norm_stats.branch
   trunk_stats = op.norm_stats.trunk
@@ -69,10 +69,10 @@ function Algebra.solve(
   n_samples = size(raw_params,2)
 
   # Apply the branch_sampler
-  f_in_list = [Float32.(strategy.branch_sampler(raw_params[:,i])) for i in 1:n_samples]
-  params_matrix = reduce(hcat,f_in_list)
-
-  f_in = (params_matrix .- branch_stats.μ) ./ branch_stats.σ
+  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
+  params_matrix .-= branch_stats.μ
+  params_matrix ./= branch_stats.σ
+  f_in = params_matrix
 
   # Trunk Input (Spatiotemporal Coordinates Extraction)
   t_grid = Float32.(get_times(r))
@@ -88,7 +88,7 @@ function Algebra.solve(
 
   # Building the grid (x,t) equal to the one used during the training
   col = 1
-  for t_val in t_grid
+  @views for t_val in t_grid
     for x_idx in 1:N_dofs
       x_test[1:D_phys,col] .= x_raw[:,x_idx]
       x_test[D_phys+1,col] = t_val
@@ -96,7 +96,9 @@ function Algebra.solve(
     end
   end
 
-  x_in = (x_test .- trunk_stats.μ) ./ trunk_stats.σ
+  x_test .-= trunk_stats.μ
+  x_test ./= trunk_stats.σ
+  x_in = x_test
 
   # Inference Execution
   t = @timed begin
@@ -140,7 +142,7 @@ function Algebra.solve(
   ps = op.model_weights
   st = op.model_states
   max_u = op.max_u
-  strategy = get_state_reduction(solver).strategy
+  strategy = get_state_reduction(solver) |> get_strategy
 
   u_in_stats = op.norm_stats.u_in
   y_in_stats = op.norm_stats.y_in
@@ -150,8 +152,7 @@ function Algebra.solve(
   raw_params = Float32.(matrix_of_params(param_realisation))
   n_samples = size(raw_params,2)
 
-  f_in_list = [Float32.(strategy.branch_sampler(raw_params[:,i])) for i in 1:n_samples]
-  params_matrix = reduce(hcat,f_in_list)
+  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
   n_sensors = size(params_matrix,1)
 
   # Space-time grid extrapolation
@@ -169,7 +170,7 @@ function Algebra.solve(
   y_in = zeros(Float32,D_phys + 1,N_tot) # D_phys + 1 for time
 
   col = 1
-  for sample_idx in 1:n_samples
+  @views for sample_idx in 1:n_samples
     sensor_vals = params_matrix[:,sample_idx]
     for t_idx in 1:N_time
       t_val = t_grid[t_idx]
@@ -183,8 +184,10 @@ function Algebra.solve(
   end
 
   # Normalization
-  u_in = (u_in .- u_in_stats.μ) ./ u_in_stats.σ
-  y_in = (y_in .- y_in_stats.μ) ./ y_in_stats.σ
+  u_in .-= u_in_stats.μ
+  u_in ./= u_in_stats.σ
+  y_in .-= y_in_stats.μ
+  y_in ./= y_in_stats.σ
 
   # Inference
   t = @timed begin

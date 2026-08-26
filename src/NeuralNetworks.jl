@@ -382,7 +382,7 @@ struct AutoDecoderType <: NNType end
 # Allocating but ForwardDiff-transparent; used during training only.
 function _mlp_apply(
   layers::NTuple{L,Int}, activation::Function, θ::AbstractVector, x::AbstractMatrix
-) where L
+  ) where L
   T = eltype(θ)
   h = T === eltype(x) ? x : T.(x)
   offset = 0

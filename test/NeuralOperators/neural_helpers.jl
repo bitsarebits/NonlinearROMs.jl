@@ -53,17 +53,17 @@ end
 
   # Epoch 1: improvement
   step_scheduler!(plat,opt_state_plat,1,0.5f0)
-  @test plat.wait == 0
+  @test plat.wait[] == 0
 
   # Epoch 2: No improvement
   step_scheduler!(plat,opt_state_plat,2,0.6f0)
-  @test plat.wait == 1
+  @test plat.wait[] == 1
   @test opt_state_plat.rule.eta == 1.0f0 # No drop yet
 
   # Epoch 3: Patience limit reached,drop lr by half
   step_scheduler!(plat,opt_state_plat,3,0.6f0)
   @test opt_state_plat.rule.eta ≈ 0.5f0
-  @test plat.wait == 0 # Patience resetted
+  @test plat.wait[] == 0 # Patience resetted
 end
 
 @testset "Model Resolution and Arch Building" begin

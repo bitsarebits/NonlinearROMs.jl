@@ -11,8 +11,29 @@ function compute_zscore_stats(data::AbstractMatrix)
   μ = mean(data,dims=2)
   σ = std(data,dims=2)
   # Avoid dividing by zero if a feature is constant
-  σ[σ .== 0] .= 1.0f0
+  for i in eachindex(σ)
+    iszero(σ[i]) && (σ[i] = 1.0f0)
+  end
   return (μ=Float32.(μ),σ=Float32.(σ))
+end
+
+"""
+    sample_branch_inputs(branch_sampler,raw_params::AbstractMatrix) -> Matrix{Float32}
+
+Applies `branch_sampler` column-wise to `raw_params` (shape `(n_params,n_samples)`),
+returning the `(nbranch_in,n_samples)` matrix of sampled Branch/sensor inputs.
+The output matrix is preallocated once its width is known from the first sample,
+avoiding the per-sample allocations of a list comprehension followed by `reduce(hcat,...)`.
+"""
+function sample_branch_inputs(branch_sampler,raw_params::AbstractMatrix)
+  n_samples = size(raw_params,2)
+  first_col = Float32.(branch_sampler(view(raw_params,:,1)))
+  params_matrix = zeros(Float32,length(first_col),n_samples)
+  params_matrix[:,1] .= first_col
+  for i in 2:n_samples
+    params_matrix[:,i] .= branch_sampler(view(raw_params,:,i))
+  end
+  return params_matrix
 end
 
 """
@@ -94,7 +115,7 @@ end
 
 function build_model(model::DeepONet)
   branch_net = build_lux_chain(model.branch_layers,model.activation)
-  trunk_net  = build_lux_chain(model.trunk_layers,model.activation)
+  trunk_net = build_lux_chain(model.trunk_layers,model.activation)
   LuxDeepONet(branch_net,trunk_net)
 end
 
@@ -166,11 +187,11 @@ function train_nomad!(train_state,dataloader,lr_scheduler;logger::TrainingLog)
         )
 
         _,loss_val,_,train_state = Lux.Training.single_train_step!(
-            Lux.AutoEnzyme(),
-            Lux.MSELoss(),
-            batch_dev,
-            train_state;
-            return_gradients=Val(false)
+          Lux.AutoEnzyme(),
+          Lux.MSELoss(),
+          batch_dev,
+          train_state;
+          return_gradients=Val(false)
         )
         current_loss += Float32(loss_val)
       end
@@ -192,7 +213,7 @@ function train_neural_operator(
   red::DeepONetReduction,
   feop::ParamOperator,
   s::AbstractSnapshots
-)
+  )
   strategy = red.strategy
 
   # Data extraction
@@ -201,30 +222,31 @@ function train_neural_operator(
   N_dofs = size(target_data_full,1)
 
   idx_x = 1:strategy.step_x:N_dofs
-  target_data = target_data_full[idx_x,:]
+  target_data = @views target_data_full[idx_x,:]
 
   realisation = get_realisation(s)
   raw_params = Float32.(matrix_of_params(realisation))
   n_samples = size(raw_params,2)
 
-  f_in_list = [Float32.(strategy.branch_sampler(raw_params[:,i])) for i in 1:n_samples]
-  params_matrix = reduce(hcat,f_in_list)
+  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
 
   # normalization
-  max_u = maximum(abs.(target_data))
+  max_u = maximum(abs,target_data)
   target_data ./= max_u
 
   # DoF coordinates extraction (Trunk input)
   V = get_test(feop)
   x_train_full = get_coords_with_order(V) # shape: (D_phys,full_N_dofs)
-  x_train = x_train_full[:,idx_x]
+  x_train = @views x_train_full[:,idx_x]
 
   # Input normalization
   branch_stats = compute_zscore_stats(params_matrix)
-  params_matrix = (params_matrix .- branch_stats.μ) ./ branch_stats.σ
+  params_matrix .-= branch_stats.μ
+  params_matrix ./= branch_stats.σ
 
   trunk_stats = compute_zscore_stats(x_train)
-  x_train = (x_train .- trunk_stats.μ) ./ trunk_stats.σ
+  x_train .-= trunk_stats.μ
+  x_train ./= trunk_stats.σ
 
   # Building the DeepONet
   deepONet = build_model(strategy.model)
@@ -269,7 +291,7 @@ function train_neural_operator(
   s::AbstractSnapshots,
   pretrained_op::NeuralRBOperator;
   update_stats::Bool = false
-)
+  )
   strategy = red.strategy
 
   # Data extraction
@@ -278,32 +300,31 @@ function train_neural_operator(
   N_dofs = size(target_data_full,1)
 
   idx_x = 1:strategy.step_x:N_dofs
-  target_data = target_data_full[idx_x,:]
+  target_data = @views target_data_full[idx_x,:]
 
   realisation = get_realisation(s)
   raw_params = Float32.(matrix_of_params(realisation))
   n_samples = size(raw_params,2)
 
-  f_in_list = [Float32.(strategy.branch_sampler(raw_params[:,i])) for i in 1:n_samples]
-  params_matrix = reduce(hcat,f_in_list)
+  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
 
   V = get_test(feop)
   x_train_full = get_coords_with_order(V)
-  x_train = x_train_full[:,idx_x]
+  x_train = @views x_train_full[:,idx_x]
 
-  n_branch_in = size(params_matrix,1)
-  n_trunk_in  = size(x_train,1)
+  nbranch_in = size(params_matrix,1)
+  ntrunk_in = size(x_train,1)
 
   # Dimensions check for fine-tuning
   expected_branch_in = length(pretrained_op.norm_stats.branch.μ)
-  expected_trunk_in  = length(pretrained_op.norm_stats.trunk.μ)
-  @assert n_branch_in == expected_branch_in "Branch dimension mismatch: expected $expected_branch_in,got $n_branch_in. Check branch_sampler."
-  @assert n_trunk_in == expected_trunk_in "Trunk dimension mismatch: expected $expected_trunk_in,got $n_trunk_in."
+  expected_trunk_in = length(pretrained_op.norm_stats.trunk.μ)
+  @assert nbranch_in == expected_branch_in "Branch dimension mismatch: expected $expected_branch_in,got $nbranch_in. Check branch_sampler."
+  @assert ntrunk_in == expected_trunk_in "Trunk dimension mismatch: expected $expected_trunk_in,got $ntrunk_in."
 
   # Normalization setup
   if update_stats
     strategy.verbose && @info "Recomputing the normalization statistics."
-    max_u = maximum(abs.(target_data))
+    max_u = maximum(abs,target_data)
     branch_stats = compute_zscore_stats(params_matrix)
     trunk_stats = compute_zscore_stats(x_train)
   else
@@ -315,8 +336,10 @@ function train_neural_operator(
 
   # Normalization
   target_data ./= max_u
-  params_matrix = (params_matrix .- branch_stats.μ) ./ branch_stats.σ
-  x_train = (x_train .- trunk_stats.μ) ./ trunk_stats.σ
+  params_matrix .-= branch_stats.μ
+  params_matrix ./= branch_stats.σ
+  x_train .-= trunk_stats.μ
+  x_train ./= trunk_stats.σ
 
   # Pretrained-model
   deepONet = pretrained_op.model
@@ -353,10 +376,10 @@ function train_neural_operator(
 end
 
 function train_neural_operator(
-    red::NOMADReduction,
-    feop::ParamOperator,
-    s::AbstractSnapshots
-)
+  red::NOMADReduction,
+  feop::ParamOperator,
+  s::AbstractSnapshots
+  )
   strategy = red.strategy
 
   # Data extraction
@@ -372,43 +395,44 @@ function train_neural_operator(
   n_samples = size(raw_params,2)
 
   # Sensors extraction (like branch input in DeepONet)
-  f_in_list = [Float32.(strategy.branch_sampler(raw_params[:,i])) for i in 1:n_samples]
-  params_matrix = reduce(hcat,f_in_list)
+  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
   n_sensors = size(params_matrix,1)
 
   # DoF coordinates extraction (like trunk input in DeepONet)
   V = get_test(feop)
   x_train_full = get_coords_with_order(V) # shape: (D_phys,full_N_dofs)
-  x_red = x_train_full[:,idx_x]
+  x_red = @views x_train_full[:,idx_x]
   D_phys = size(x_red,1)
 
   # Flattening for NOMAD
   N_tot = N_x_red * n_samples
 
-  u_in  = zeros(Float32,n_sensors,N_tot)
-  y_in  = zeros(Float32,D_phys,N_tot)
+  u_in = zeros(Float32,n_sensors,N_tot)
+  y_in = zeros(Float32,D_phys,N_tot)
   v_out = zeros(Float32,1,N_tot)
 
   col_idx = 1
-  for i in 1:n_samples
+  @views for i in 1:n_samples
     sensor_vals = params_matrix[:,i]
     for (x_idx_reduced,x_idx_full) in enumerate(idx_x)
       u_in[:,col_idx]  .= sensor_vals
       y_in[:,col_idx]  .= x_red[:,x_idx_reduced]
-      v_out[1,col_idx]  = target_data_full[x_idx_full,i]
+      v_out[1,col_idx] = target_data_full[x_idx_full,i]
       col_idx += 1
     end
   end
 
   # normalization
-  max_u = maximum(abs.(v_out))
+  max_u = maximum(abs,v_out)
   v_out ./= max_u
 
   u_in_stats = compute_zscore_stats(u_in)
-  u_in = (u_in .- u_in_stats.μ) ./ u_in_stats.σ
+  u_in .-= u_in_stats.μ
+  u_in ./= u_in_stats.σ
 
   y_in_stats = compute_zscore_stats(y_in)
-  y_in = (y_in .- y_in_stats.μ) ./ y_in_stats.σ
+  y_in .-= y_in_stats.μ
+  y_in ./= y_in_stats.σ
 
   # Building the NOMAD model
   nomad_net = build_model(strategy.model)
@@ -447,12 +471,12 @@ function train_neural_operator(
 end
 
 function train_neural_operator(
-    red::NOMADReduction,
-    feop::ParamOperator,
-    s::AbstractSnapshots,
-    pretrained_op::NeuralRBOperator;
-    update_stats::Bool = false
-)
+  red::NOMADReduction,
+  feop::ParamOperator,
+  s::AbstractSnapshots,
+  pretrained_op::NeuralRBOperator;
+  update_stats::Bool = false
+  )
   strategy = red.strategy
 
   # Data extraction
@@ -466,29 +490,28 @@ function train_neural_operator(
   raw_params = Float32.(matrix_of_params(realisation))
   n_samples = size(raw_params,2)
 
-  f_in_list = [Float32.(strategy.branch_sampler(raw_params[:,i])) for i in 1:n_samples]
-  params_matrix = reduce(hcat,f_in_list)
+  params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
   n_sensors = size(params_matrix,1)
 
   V = get_test(feop)
   x_train_full = get_coords_with_order(V)
-  x_red = x_train_full[:,idx_x]
+  x_red = @views x_train_full[:,idx_x]
   D_phys = size(x_red,1)
 
   # Flattening for NOMAD
   N_tot = N_x_red * n_samples
 
-  u_in  = zeros(Float32,n_sensors,N_tot)
-  y_in  = zeros(Float32,D_phys,N_tot)
+  u_in = zeros(Float32,n_sensors,N_tot)
+  y_in = zeros(Float32,D_phys,N_tot)
   v_out = zeros(Float32,1,N_tot)
 
   col_idx = 1
-  for i in 1:n_samples
+  @views for i in 1:n_samples
     sensor_vals = params_matrix[:,i]
     for (x_idx_reduced,x_idx_full) in enumerate(idx_x)
       u_in[:,col_idx]  .= sensor_vals
       y_in[:,col_idx]  .= x_red[:,x_idx_reduced]
-      v_out[1,col_idx]  = target_data_full[x_idx_full,i]
+      v_out[1,col_idx] = target_data_full[x_idx_full,i]
       col_idx += 1
     end
   end
@@ -502,7 +525,7 @@ function train_neural_operator(
   # Normalization
   if update_stats
     strategy.verbose && @info "Recomputing the normalization statistics."
-    max_u = maximum(abs.(v_out))
+    max_u = maximum(abs,v_out)
     u_in_stats = compute_zscore_stats(u_in)
     y_in_stats = compute_zscore_stats(y_in)
   else
@@ -513,8 +536,10 @@ function train_neural_operator(
   end
 
   v_out ./= max_u
-  u_in = (u_in .- u_in_stats.μ) ./ u_in_stats.σ
-  y_in = (y_in .- y_in_stats.μ) ./ y_in_stats.σ
+  u_in .-= u_in_stats.μ
+  u_in ./= u_in_stats.σ
+  y_in .-= y_in_stats.μ
+  y_in ./= y_in_stats.σ
 
   # Pretrained model
   nomad_net = pretrained_op.model

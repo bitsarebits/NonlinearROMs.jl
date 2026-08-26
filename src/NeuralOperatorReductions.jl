@@ -46,7 +46,7 @@ strategy = NeuralOpStrategy(
   batch_size = 32,
   step_x = 2, # Use half of the spatial DoFs for training
   lr_scheduler = CosineAnnealing(5000, lr_max=1e-3, lr_min=1e-6)
-)
+  )
 ```
 
 **Advanced Usage (Multi-Sensor & Multi-Scale):**
@@ -55,7 +55,7 @@ strategy = NeuralOpStrategy(
 strategy_log = NeuralOpStrategy(
   model = DeepONet(2, 3; width=64, depth=3), # 2 params -> Branch; 3D coords -> Trunk
   branch_sampler = p -> log10.(p)
-)
+  )
 
 # Multi-parameter sampling mapping into concatenated sensor functions
 m_sensors = 100
@@ -66,7 +66,7 @@ x_sensors = range(0, 1, length=m_sensors)
 
 f1(x, sigma) = (1 / √(2 * π * sigma)) * exp(-x^2 / (2 * sigma))
 f2(x, sigma) = sigma * x^2
-f3(x, mu)    = sin(mu * x)
+f3(x, mu) = sin(mu * x)
 
 branch_sampler_func = (p) -> begin
     sigma, mu = p[1], p[2]
@@ -84,7 +84,7 @@ end
 strategy_multi = NeuralOpStrategy(
   model = DeepONet(300, 1; width=64, depth=3), # 300 concatenated sensors -> Branch; 1D coords -> Trunk
   branch_sampler = branch_sampler_func
-)
+  )
 ```
 """
 Base.@kwdef struct NeuralOpStrategy{M,S}
@@ -208,7 +208,7 @@ using Lux
 strategy = NeuralOpStrategy(
   model = DeepONet(2, 2; width=128, depth=4, activation=Lux.gelu),
   epochs = 1000
-)
+  )
 reduction = DeepONetReduction(strategy)
 solver = NeuralOpSolver(ThetaMethod(LUSolver(), dt, θ), reduction)
 ```
