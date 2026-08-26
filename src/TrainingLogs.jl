@@ -1,3 +1,12 @@
+function format_eta(eta_seconds::Real)
+  eta_sec = round(Int,eta_seconds)
+  h = div(eta_sec,3600)
+  m = div(rem(eta_sec,3600),60)
+  s = rem(eta_sec,60)
+  return h > 0 ? "$(lpad(h,2,'0')):$(lpad(m,2,'0')):$(lpad(s,2,'0'))" :
+         "$(lpad(m,2,'0')):$(lpad(s,2,'0'))"
+end
+
 mutable struct TrainingLog
   name::String
   max_epochs::Int
@@ -13,7 +22,7 @@ end
 
 function init!(log::TrainingLog)
   !log.verbose && return nothing
-  
+
   log.t_start = time()
   @info "Starting $(log.name) Training on Reactant Device (First epoch compiles XLA...)"
   return nothing
@@ -32,7 +41,7 @@ function update!(log::TrainingLog,epoch::Int,current_loss::Real)
     elapsed_fast = time() - log.t_start_fast
     time_per_epoch = epoch > 1 ? elapsed_fast / (epoch - 1) : 0.0
     eta_seconds = time_per_epoch * (log.max_epochs - epoch)
-    
+
     msg = "> Epoch: $(lpad(epoch,5)) \t Loss: $(Float32(current_loss)) \t ETA: $(format_eta(eta_seconds))"
     println(msg)
   end
@@ -41,7 +50,7 @@ end
 
 function finalize!(log::TrainingLog)
   !log.verbose && return nothing
-  
+
   total_mins = round((time() - log.t_start) / 60,digits=2)
   @info "Training $(log.name) Completed in $total_mins minutes"
   return nothing

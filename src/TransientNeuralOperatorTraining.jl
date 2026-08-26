@@ -1,4 +1,4 @@
-function RBSteady.train_neural_operator(
+function train_neural_operator(
   red::DeepONetReduction,
   feop::ODEParamOperator,
   s::AbstractSnapshots
@@ -15,7 +15,7 @@ function RBSteady.train_neural_operator(
   param_realisation = get_params(realisation)
   raw_params = Float32.(matrix_of_params(param_realisation))
   n_samples = size(raw_params,2)
-  
+
   f_in_list = [Float32.(strategy.branch_sampler(raw_params[:,i])) for i in 1:n_samples]
   params_matrix = reduce(hcat,f_in_list)
 
@@ -34,12 +34,6 @@ function RBSteady.train_neural_operator(
 
   # Coordinates extraction (Trunk input)
   V = get_test(feop)
-
-  # Safety check for proper spatial mapping
-  if !(V isa OrderedFESpace || (V isa TrialFESpace && V.space isa OrderedFESpace))
-    throw(ArgumentError("The FE space MUST be an OrderedFESpace. Standard FESpaces do not guarantee DoF ordering, which would silently corrupt the neural operator training mapping."))
-  end
-
   coords_raw = get_coords_with_order(V) # Shape: (D_phys,N_dofs)
   D_phys = size(coords_raw,1)
 
@@ -72,14 +66,14 @@ function RBSteady.train_neural_operator(
   # Data dimension
   n_branch_in = size(params_matrix,1)
   n_trunk_in  = size(x_train,1)
-  
+
   # Normalization
   max_u = maximum(abs.(u_train))
   u_train ./= max_u
-  
+
   branch_stats = compute_zscore_stats(params_matrix)
   params_matrix = (params_matrix .- branch_stats.μ) ./ branch_stats.σ
-  
+
   trunk_stats = compute_zscore_stats(x_train)
   x_train = (x_train .- trunk_stats.μ) ./ trunk_stats.σ
 
@@ -98,27 +92,27 @@ function RBSteady.train_neural_operator(
   rng = Random.default_rng()
   Random.seed!(rng,42)
   ps,st = Lux.setup(rng,deepONet) |> XDEV
-  
+
   initial_lr = get_initial_lr(strategy.lr_scheduler)
 
   opt = Optimisers.Adam(initial_lr)
   train_state = Lux.Training.TrainState(deepONet,ps,st,opt)
-  
+
   # Verbosity level setup
   logger = TrainingLog("DeepONet",strategy.epochs;verbose=strategy.verbose,print_every=strategy.print_every)
 
-  # Training execution defined in RBSteady
+  # Training execution defined in NeuralOperatorTraining.jl
   ps_trained,st_trained =
     train_deeponet!(train_state,dataloader,x_data_dev,strategy.lr_scheduler;logger=logger)
 
   st_test = Lux.testmode(st_trained) |> CDEV
-  
+
   norm_stats = (branch = branch_stats,trunk = trunk_stats)
-  
+
   return deepONet,ps_trained |> CDEV,st_test,norm_stats,Float32(max_u)
 end
 
-function RBSteady.train_neural_operator(
+function train_neural_operator(
   red::DeepONetReduction,
   feop::ODEParamOperator,
   s::AbstractSnapshots,
@@ -135,7 +129,7 @@ function RBSteady.train_neural_operator(
   param_realisation = get_params(realisation)
   raw_params = Float32.(matrix_of_params(param_realisation))
   n_samples = size(raw_params,2)
-  
+
   f_in_list = [Float32.(strategy.branch_sampler(raw_params[:,i])) for i in 1:n_samples]
   params_matrix = reduce(hcat,f_in_list)
 
@@ -151,12 +145,7 @@ function RBSteady.train_neural_operator(
   N_points = N_x_red * N_t_red
 
   V = get_test(feop)
-
-  if !(V isa OrderedFESpace || (V isa TrialFESpace && V.space isa OrderedFESpace))
-    throw(ArgumentError("The FE space MUST be an OrderedFESpace. Standard FESpaces do not guarantee DoF ordering, which would silently corrupt the neural operator training mapping."))
-  end
-
-  coords_raw = get_coords_with_order(V) 
+  coords_raw = get_coords_with_order(V)
   D_phys = size(coords_raw,1)
 
   x_train = zeros(Float32,D_phys + 1,N_points)
@@ -183,7 +172,7 @@ function RBSteady.train_neural_operator(
 
   n_branch_in = size(params_matrix,1)
   n_trunk_in  = size(x_train,1)
-  
+
   # Dimensions check for fine-tuning
   expected_branch_in = length(pretrained_op.norm_stats.branch.μ)
   expected_trunk_in  = length(pretrained_op.norm_stats.trunk.μ)
@@ -221,7 +210,7 @@ function RBSteady.train_neural_operator(
   initial_lr = get_initial_lr(strategy.lr_scheduler)
   opt = Optimisers.Adam(initial_lr)
   train_state = Lux.Training.TrainState(deepONet,ps,st,opt)
-  
+
   # Verbosity level setup
   logger = TrainingLog("DeepONet",strategy.epochs;verbose=strategy.verbose,print_every=strategy.print_every)
 
@@ -232,11 +221,11 @@ function RBSteady.train_neural_operator(
 
   st_test = Lux.testmode(st_trained) |> CDEV
   norm_stats = (branch = branch_stats,trunk = trunk_stats)
-  
+
   return deepONet,ps_trained |> CDEV,st_test,norm_stats,Float32(max_u)
 end
 
-function RBSteady.train_neural_operator(
+function train_neural_operator(
   red::NOMADReduction,
   feop::ODEParamOperator,
   s::AbstractSnapshots
@@ -252,7 +241,7 @@ function RBSteady.train_neural_operator(
   param_realisation = get_params(realisation)
   raw_params = Float32.(matrix_of_params(param_realisation))
   n_samples = size(raw_params,2)
-  
+
   f_in_list = [Float32.(strategy.branch_sampler(raw_params[:,i])) for i in 1:n_samples]
   params_matrix = reduce(hcat,f_in_list)
   n_sensors = size(params_matrix,1)
@@ -268,17 +257,13 @@ function RBSteady.train_neural_operator(
   idx_t = 1:strategy.step_t:N_time
   N_x_red = length(idx_x)
   N_t_red = length(idx_t)
-  
+
   # Computing total number of points
   N_points = N_x_red * N_t_red
   N_tot = N_points * n_samples
 
   # Coordinates extraction (Trunk input)
   V = get_test(feop)
-  if !(V isa OrderedFESpace || (V isa TrialFESpace && V.space isa OrderedFESpace))
-    throw(ArgumentError("The FE space MUST be an OrderedFESpace. Standard FESpaces do not guarantee DoF ordering, which would silently corrupt the neural operator training mapping."))
-  end
-
   coords_raw = get_coords_with_order(V) # Shape: (D_phys,N_dofs)
   x_red = coords_raw[:,idx_x]
   D_phys = size(x_red,1)
@@ -291,21 +276,21 @@ function RBSteady.train_neural_operator(
   col = 1
   for sample_idx in 1:n_samples
     sensor_vals = params_matrix[:,sample_idx]
-    
+
     for t_idx in idx_t
       t_val = t_grid[t_idx]
-      
+
       for (x_idx_reduced,x_idx_full) in enumerate(idx_x)
         # Replicating the sensor for that sample
         u_in[:,col] .= sensor_vals
-        
+
         # Space-time coordinates
         y_in[1:D_phys,col] .= x_red[:,x_idx_reduced]
         y_in[D_phys+1,col]   = t_val
-        
+
         # Ground truth extraction from the 3D snapshot
         v_out[1,col] = target_data[x_idx_full,sample_idx,t_idx]
-        
+
         col += 1
       end
     end
@@ -314,10 +299,10 @@ function RBSteady.train_neural_operator(
   # Normalization (z-score and Max)
   max_u = maximum(abs.(v_out))
   v_out ./= max_u
-  
+
   u_in_stats = compute_zscore_stats(u_in)
   u_in = (u_in .- u_in_stats.μ) ./ u_in_stats.σ
-  
+
   y_in_stats = compute_zscore_stats(y_in)
   y_in = (y_in .- y_in_stats.μ) ./ y_in_stats.σ
 
@@ -338,11 +323,11 @@ function RBSteady.train_neural_operator(
   rng = Random.default_rng()
   Random.seed!(rng,42)
   ps,st = Lux.setup(rng,nomad_net) |> XDEV
-  
+
   initial_lr = get_initial_lr(strategy.lr_scheduler)
   opt = Optimisers.Adam(initial_lr)
   train_state = Lux.Training.TrainState(nomad_net,ps,st,opt)
-  
+
   # Verbosity level setup
   logger = TrainingLog("NOMAD",strategy.epochs;verbose=strategy.verbose,print_every=strategy.print_every)
 
@@ -352,15 +337,14 @@ function RBSteady.train_neural_operator(
   )
 
   st_test = Lux.testmode(st_trained) |> CDEV
-  
+
   # norm_stats
   norm_stats = (u_in = u_in_stats,y_in = y_in_stats)
-  
+
   return nomad_net,ps_trained |> CDEV,st_test,norm_stats,Float32(max_u)
 end
 
-
-function RBSteady.train_neural_operator(
+function train_neural_operator(
   red::NOMADReduction,
   feop::ODEParamOperator,
   s::AbstractSnapshots,
@@ -371,13 +355,13 @@ function RBSteady.train_neural_operator(
   strategy = red.strategy
 
   # Data Extraction
-  target_data = Float32.(get_all_data(s))  
+  target_data = Float32.(get_all_data(s))
   realisation = get_realisation(s)
 
   param_realisation = get_params(realisation)
   raw_params = Float32.(matrix_of_params(param_realisation))
   n_samples = size(raw_params,2)
-  
+
   f_in_list = [Float32.(strategy.branch_sampler(raw_params[:,i])) for i in 1:n_samples]
   params_matrix = reduce(hcat,f_in_list)
   n_sensors = size(params_matrix,1)
@@ -391,21 +375,17 @@ function RBSteady.train_neural_operator(
   idx_t = 1:strategy.step_t:N_time
   N_x_red = length(idx_x)
   N_t_red = length(idx_t)
-  
+
   N_points = N_x_red * N_t_red
   N_tot = N_points * n_samples
 
   V = get_test(feop)
-  if !(V isa OrderedFESpace || (V isa TrialFESpace && V.space isa OrderedFESpace))
-    throw(ArgumentError("The FE space MUST be an OrderedFESpace. Standard FESpaces do not guarantee DoF ordering, which would silently corrupt the neural operator training mapping."))
-  end
-
-  coords_raw = get_coords_with_order(V) 
+  coords_raw = get_coords_with_order(V)
   x_red = coords_raw[:,idx_x]
   D_phys = size(x_red,1)
 
   u_in  = zeros(Float32,n_sensors,N_tot)
-  y_in  = zeros(Float32,D_phys + 1,N_tot)  
+  y_in  = zeros(Float32,D_phys + 1,N_tot)
   v_out = zeros(Float32,1,N_tot)
 
   col = 1
@@ -459,11 +439,11 @@ function RBSteady.train_neural_operator(
     shuffle=true,
     partial=false
   )
-  
+
   initial_lr = get_initial_lr(strategy.lr_scheduler)
   opt = Optimisers.Adam(initial_lr)
   train_state = Lux.Training.TrainState(nomad_net,ps,st,opt)
-  
+
   # Verbosity level setup
   logger = TrainingLog("NOMAD",strategy.epochs;verbose=strategy.verbose,print_every=strategy.print_every)
 
@@ -474,6 +454,6 @@ function RBSteady.train_neural_operator(
 
   st_test = Lux.testmode(st_trained) |> CDEV
   norm_stats = (u_in = u_in_stats,y_in = y_in_stats)
-  
+
   return nomad_net,ps_trained |> CDEV,st_test,norm_stats,Float32(max_u)
 end

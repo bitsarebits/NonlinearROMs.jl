@@ -1,0 +1,230 @@
+"""
+    reduced_operator(
+      solver::NeuralOpSolver,
+      feop::ParamOperator,
+      s::AbstractSnapshots
+    )
+
+Executes the **Offline Phase** for Neural Operators on steady-state problems.
+This method triggers the training loop of the neural network specified in the `solver`.
+
+It automatically extracts the training dataset (parameters/sensors and spatial coordinates) from the snapshots `s` and the FE operator `feop`, normalizes the data, and performs the optimization.
+
+Returns a `NeuralRBOperator` containing the trained network, its optimized weights, and the normalization statistics required for the online phase.
+"""
+function RBSteady.reduced_operator(
+  solver::NeuralOpSolver,
+  feop::ParamOperator,
+  s::AbstractSnapshots
+  )
+
+  reduction = RBSteady.get_state_reduction(solver)
+  model,ps,st,norm_stats,max_u = train_neural_operator(reduction,feop,s)
+  NeuralRBOperator(feop,model,ps,st,norm_stats,max_u)
+end
+
+"""
+    reduced_operator(
+      solver::NeuralOpSolver,
+      feop::ParamOperator,
+      s::AbstractSnapshots,
+      pretrained_op::NeuralRBOperator;
+      update_stats::Bool = false
+    )
+
+Performs **Fine-Tuning (Continual or Transfer Learning)** on a previously trained Neural Operator.
+It initializes the neural network with the weights and states of the `pretrained_op`, continuing the training using the newly provided snapshots `s` and the configuration defined in `solver`.
+
+# Arguments
+- `solver`: The `NeuralOpSolver` containing the updated training configuration (e.g., lower learning rate, new epochs).
+- `feop`: The high-fidelity parametric operator.
+- `s`: The new `Snapshots` dataset for fine-tuning.
+- `pretrained_op`: The previously trained `NeuralRBOperator`.
+
+# Keyword Arguments
+- `update_stats::Bool`: Dictates how data normalization is handled.
+  - If `false` (default): The model inherits the original normalization statistics (\$\\mu\$, \$\\sigma\$, and `max_u`) from the `pretrained_op`. Best for **Continual Learning** where the new data is drawn from the same underlying distribution.
+  - If `true`: The model recomputes entirely new normalization statistics based solely on the new snapshots `s`. Best for **Transfer Learning** when shifting to a drastically different parameter space or domain scale.
+
+# Examples
+```julia
+# Define the shared architecture
+model_arch = AutoDeepONet()
+
+# Base Training
+base_strategy = NeuralOpStrategy(model=model_arch, epochs=5000)
+solver_base = NeuralOpSolver(LUSolver(), DeepONetReduction(base_strategy))
+pretrained_op = reduced_operator(solver_base, feop, snapshots_base)
+
+# Fine-Tuning with a smaller learning rate on a refined dataset
+ft_strategy = NeuralOpStrategy(
+  model = model_arch, # match the pretrained one
+  epochs = 1000,
+  lr_scheduler = CosineAnnealing(lr_max=1e-5) # Smaller LR
+)
+solver_ft = NeuralOpSolver(LUSolver(), DeepONetReduction(ft_strategy))
+
+# Continual learning (inherits original stats)
+new_op = reduced_operator(solver_ft, feop, snapshots_new, pretrained_op; update_stats=false)
+```
+"""
+function RBSteady.reduced_operator(
+  solver::NeuralOpSolver,
+  feop::ParamOperator,
+  s::AbstractSnapshots,
+  pretrained_op::NeuralRBOperator;
+  update_stats::Bool = false
+)
+
+  reduction = RBSteady.get_state_reduction(solver)
+  model,ps,st,norm_stats,max_u = train_neural_operator(reduction,feop,s,pretrained_op;update_stats=update_stats)
+  NeuralRBOperator(feop,model,ps,st,norm_stats,max_u)
+end
+
+"""
+    reduced_operator(
+        solver::NeuralOpSolver,
+        s::AbstractSnapshots,
+        pretrained_op::NeuralRBOperator;
+        update_stats::Bool = false
+    )
+
+Automatically extracts the high-fidelity operator (`feop`) from `pretrained_op.op` and invokes the main fine-tuning routine.
+"""
+function RBSteady.reduced_operator(
+    solver::NeuralOpSolver,
+    s::AbstractSnapshots,
+    pretrained_op::NeuralRBOperator;
+    update_stats::Bool = false
+)
+
+  feop = pretrained_op.op
+  RBSteady.reduced_operator(solver,feop,s,pretrained_op;update_stats=update_stats)
+end
+
+function Algebra.solve(
+  solver::NeuralOpSolver{<:Any,<:DeepONetReduction},
+  op::NeuralRBOperator,
+  r::Realisation
+  )
+
+  deepONet = op.model
+  ps = op.model_weights
+  st = op.model_states
+  max_u = op.max_u
+  strategy = RBSteady.get_state_reduction(solver).strategy
+
+  branch_stats = op.norm_stats.branch
+  trunk_stats = op.norm_stats.trunk
+
+  # Branch Input (Parameters extraction)
+  raw_params = Float32.(matrix_of_params(r))
+  n_samples = size(raw_params,2)
+
+  f_in_list = [Float32.(strategy.branch_sampler(raw_params[:,i])) for i in 1:n_samples]
+  params_matrix = reduce(hcat,f_in_list)
+
+  f_in = (params_matrix .- branch_stats.μ) ./ branch_stats.σ
+
+  # Trunk Input (Coordinates extraction)
+  V = get_test(op.op)
+
+  x_test = get_coords_with_order(V)
+  x_in = (x_test .- trunk_stats.μ) ./ trunk_stats.σ
+
+  # Inference Execution
+  t = @timed begin
+    pred_cpu,_ = deepONet((f_in,x_in),ps,st)
+  end
+
+  # Denormalize output
+  pred_cpu .*= max_u
+
+  # Data Packaging for GridapROMs
+  fe_data = ConsecutiveParamArray(Float64.(pred_cpu))
+
+  # RBParamVector requires a reduced-data component; neural operators
+  # directly predict the FE solution, so this component is empty/dummy.
+  dummy_red_data = ConsecutiveParamArray(zeros(Float64,1,n_samples))
+
+  x̂ = RBParamVector(dummy_red_data,fe_data)
+  stats = CostTracker(t,nruns=n_samples,name="DeepONet Inference")
+
+  return x̂,stats
+end
+
+function Algebra.solve(
+  solver::NeuralOpSolver{<:Any,<:NOMADReduction},
+  op::NeuralRBOperator,
+  r::Realisation
+  )
+
+  nomad_net = op.model
+  ps = op.model_weights
+  st = op.model_states
+  max_u = op.max_u
+  strategy = RBSteady.get_state_reduction(solver).strategy
+
+  u_in_stats = op.norm_stats.u_in
+  y_in_stats = op.norm_stats.y_in
+
+  # Parameters and Sensors extraction
+  raw_params = Float32.(matrix_of_params(r))
+  n_samples = size(raw_params,2)
+
+  f_in_list = [Float32.(strategy.branch_sampler(raw_params[:,i])) for i in 1:n_samples]
+  params_matrix = reduce(hcat,f_in_list)
+  n_sensors = size(params_matrix,1)
+
+  # Coordinates extraction
+  V = get_test(op.op)
+  x_test = get_coords_with_order(V)
+  D_phys = size(x_test,1)
+  N_dofs = size(x_test,2)
+
+  # Flattening of input tensors
+  N_tot = N_dofs * n_samples
+  u_in = zeros(Float32,n_sensors,N_tot)
+  y_in = zeros(Float32,D_phys,N_tot)
+
+  col = 1
+  for sample_idx in 1:n_samples
+    sensor_vals = params_matrix[:,sample_idx]
+    for x_idx in 1:N_dofs
+      u_in[:,col] .= sensor_vals
+      y_in[:,col] .= x_test[:,x_idx]
+      col += 1
+    end
+  end
+
+  # Normalization
+  u_in = (u_in .- u_in_stats.μ) ./ u_in_stats.σ
+  y_in = (y_in .- y_in_stats.μ) ./ y_in_stats.σ
+
+  # Inference
+  t = @timed begin
+    pred_cpu,_ = nomad_net((u_in,y_in),ps,st)
+  end
+
+  # Denormalization
+  pred_cpu .*= max_u
+
+  # Reshaping of the output for GridapROMs (N_dofs,n_samples)
+  pred_2d = zeros(Float64,N_dofs,n_samples)
+  col = 1
+  for sample_idx in 1:n_samples
+    for x_idx in 1:N_dofs
+      pred_2d[x_idx,sample_idx] = pred_cpu[1,col]
+      col += 1
+    end
+  end
+
+  # Packaging in GridapROMs types
+  fe_data = ConsecutiveParamArray(pred_2d)
+  dummy_red_data = ConsecutiveParamArray(zeros(Float64,1,n_samples))
+
+  x̂ = RBParamVector(dummy_red_data,fe_data)
+  stats = CostTracker(t,nruns=n_samples,name="NOMAD Inference")
+
+  return x̂,stats
+end

@@ -5,6 +5,7 @@ using GridapROMs
 using GridapROMs.ParamDataStructures
 using GridapROMs.ParamFESpaces
 using GridapROMs.RBSteady
+using NonlinearROMs
 using GridapSolvers
 using GridapSolvers.LinearSolvers
 using Lux
@@ -25,7 +26,7 @@ a(μ,u,v,dΩ) = ∫( νμ(μ) * ∇(v) ⋅ ∇(u) )dΩ
 l(μ,v,dΩ) = ∫( fμ(μ) * v )dΩ
 res(μ,u,v,dΩ) = a(μ,u,v,dΩ) - l(μ,v,dΩ)
 
-test = OrderedFESpace(TestFESpace(model,ReferenceFE(lagrangian,Float64,1);conformity=:H1,dirichlet_tags="boundary"))
+test = TestFESpace(model,ReferenceFE(lagrangian,Float64,1);conformity=:H1,dirichlet_tags="boundary")
 
 g(μ) = x -> 0.0
 gμ(μ) = parameterise(g,μ)

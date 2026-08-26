@@ -31,19 +31,29 @@ module NonlinearROMs
 using LinearAlgebra
 using Random
 using SparseArrays
+using Statistics
+using FillArrays
 using ForwardDiff
 using Optimisers
+using Enzyme
+using Lux
+using MLUtils
+using Reactant
 
 using Gridap
 using Gridap.Algebra
 using Gridap.Arrays
 using Gridap.CellData
 using Gridap.FESpaces
+using Gridap.Geometry
 using Gridap.Helpers
+using Gridap.Polynomials
+using Gridap.ReferenceFEs
 
 using GridapROMs
 using GridapROMs.ParamDataStructures
 using GridapROMs.ParamODEs
+using GridapROMs.ParamSteady
 using GridapROMs.RBSteady
 using GridapROMs.RBTransient
 using GridapROMs.Utils
@@ -96,5 +106,47 @@ include("TransientHyperReductions.jl")
 include("TransientInterpolations.jl")
 
 include("TransientReducedOperators.jl")
+
+export AbstractLRScheduler
+export CosineAnnealing
+export ReduceLROnPlateau
+export step_scheduler!
+export get_initial_lr
+include("LRSchedulers.jl")
+
+export TrainingLog
+include("TrainingLogs.jl")
+
+export AbstractDeepONet
+export AbstractNOMAD
+export DeepONet
+export AutoDeepONet
+export NOMAD
+export AutoNOMAD
+include("NeuralOperatorModels.jl")
+
+export NeuralOpStrategy
+export NeuralOpReduction
+export DeepONetReduction
+export NOMADReduction
+export NeuralOpSolver
+export NeuralRBOperator
+include("NeuralOperatorReductions.jl")
+
+export train_neural_operator
+export train_deeponet!
+export train_nomad!
+export get_coords_with_order
+export resolve_batch_size
+export XDEV
+export CDEV
+export build_model
+export compute_zscore_stats
+export resolve_model
+include("NeuralOperatorTraining.jl")
+include("TransientNeuralOperatorTraining.jl")
+
+include("NeuralOperatorSolver.jl")
+include("TransientNeuralOperatorSolver.jl")
 
 end # module

@@ -7,14 +7,15 @@ using GridapROMs.ParamSteady
 using GridapROMs.ParamODEs
 using GridapROMs.Utils
 using GridapROMs.DofMaps
+using NonlinearROMs
 using LinearAlgebra
 
 # Mock Operators
 struct MockSteadyOpNOMAD <: ParamOperator{LinearParamEq,JointDomains} end
-Gridap.FESpaces.get_test(::MockSteadyOpNOMAD) = OrderedFESpace(FESpace(CartesianDiscreteModel((0.0,1.0),(2,)),ReferenceFE(lagrangian,Float64,1)))
+Gridap.FESpaces.get_test(::MockSteadyOpNOMAD) = FESpace(CartesianDiscreteModel((0.0,1.0),(2,)),ReferenceFE(lagrangian,Float64,1))
 
 struct MockTransientOpNOMAD <: ParamOperator{LinearParamODE,JointDomains} end
-Gridap.FESpaces.get_test(::MockTransientOpNOMAD) = OrderedFESpace(FESpace(CartesianDiscreteModel((0.0,1.0),(2,)),ReferenceFE(lagrangian,Float64,1)))
+Gridap.FESpaces.get_test(::MockTransientOpNOMAD) = FESpace(CartesianDiscreteModel((0.0,1.0),(2,)),ReferenceFE(lagrangian,Float64,1))
 
 
 @testset "NOMAD Steady Integration Pipeline" begin
@@ -97,23 +98,7 @@ end
   @test new_op.model === pretrained_op.model
 end
 
-# Mock Operator that returns a not ordered FESpace
-struct MockSteadyOpStandardNOMAD <: ParamOperator{LinearParamEq,JointDomains} end
-Gridap.FESpaces.get_test(::MockSteadyOpStandardNOMAD) = FESpace(CartesianDiscreteModel((0.0,1.0),(2,)),ReferenceFE(lagrangian,Float64,1))
-
 @testset "Error Handling and Edge Cases (NOMAD)" begin
-  @testset "OrderedFESpace Enforcement" begin
-    feop_bad = MockSteadyOpStandardNOMAD()
-    u_data = rand(Float64,3,2)
-    snaps = Snapshots(ConsecutiveParamArray(u_data),VectorDofMap(3),Realisation([rand(Float32,2) for _ in 1:2]))
-    
-    strategy = NeuralOpStrategy(model=AutoNOMAD(width=4,depth=1),epochs=1,verbose=false)
-    solver = NeuralOpSolver(LUSolver(),NOMADReduction(strategy))
-    
-    # ArgumentError for standard FESpace
-    @test_throws ArgumentError reduced_operator(solver,feop_bad,snaps)
-  end
-
   @testset "Fine-Tuning Sensors Dimension Mismatch" begin
     feop = MockSteadyOpNOMAD() 
     

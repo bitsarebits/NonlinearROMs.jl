@@ -7,6 +7,7 @@ using GridapROMs.ParamDataStructures
 using GridapROMs.ParamFESpaces
 using GridapROMs.ParamODEs
 using GridapROMs.RBTransient
+using NonlinearROMs
 using Lux
 
 # Physics Setup 
@@ -27,7 +28,7 @@ u(σ,t) = x -> (1 / √(2 * π * σ[1])) * exp(-(x[1] - c * t)^2 / (2 * σ[1]))
 uₚₜ(σ,t) = parameterise(u,σ,t)
 u₀ₚ(σ) = parameterise(u₀,σ)
 
-test = OrderedFESpace(TestFESpace(model,ReferenceFE(lagrangian,Float64,1)))
+test = TestFESpace(model,ReferenceFE(lagrangian,Float64,1))
 trial = TransientTrialParamFESpace(test,uₚₜ)
 
 m(σ,t,du,v) = ∫(v * du)dΩ

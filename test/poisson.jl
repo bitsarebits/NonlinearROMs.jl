@@ -50,14 +50,12 @@ trian_res = (Ω,Γn)
 trian_stiffness = (Ω,)
 domains = FEDomains(trian_res,trian_stiffness)
 
-energy(du,v) = ∫(v*du)dΩ + ∫(∇(v)⋅∇(du))dΩ
-
 reffe = ReferenceFE(lagrangian,Float64,order)
 test = TestFESpace(Ω,reffe;conformity=:H1,dirichlet_tags=[1,3,7])
 trial = ParamTrialFESpace(test,gμ)
 
 fesolver = LUSolver()
-state_reduction = Reduction(tol,energy;nparams,sketch,compression)
+state_reduction = Reduction(tol,H1();nparams,sketch,compression)
 res_reduction = NNHyperReduction(tol;nparams_res,sketch,compression)
 jac_reduction = NNHyperReduction(tol;nparams_jac,sketch,compression)
 rbsolver = RBSolver(fesolver,state_reduction,res_reduction,jac_reduction)

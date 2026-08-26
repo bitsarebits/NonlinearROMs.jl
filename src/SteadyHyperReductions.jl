@@ -10,7 +10,7 @@ function FESpaces.interpolate!(
   o = one(eltype2(b̂))
   x = matrix_of_params(r)
   i = RBSteady.get_interpolation(a)
-  coeff = evaluate!(cache,i.interpolation,x)
+  coeff = ConsecutiveParamArray(evaluate!(cache,i.interpolation,x))
   mul!(b̂,a,coeff,o,o)
   return b̂
 end
@@ -38,6 +38,7 @@ end
 RBSteady.get_basis(a::NNOperator) = a.bias
 RBSteady.get_style(a::NNOperator) = NNOperatorReduction()
 RBSteady.get_interpolation(a::NNOperator) = EmptyInterpolation()
+RBSteady.projection_eltype(a::NNOperator) = RBSteady.projection_eltype(a.bias)
 
 function FESpaces.interpolate!(
   b̂::AbstractArray,

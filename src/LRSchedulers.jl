@@ -25,14 +25,14 @@ mutable struct CosineAnnealing <: AbstractLRScheduler
 end
 
 CosineAnnealing(;lr_max=0.001f0,lr_min=1f-6) = CosineAnnealing(lr_max,lr_min)
-  
+
 get_initial_lr(s::CosineAnnealing) = s.lr_max
 
 function step_scheduler!(scheduler::CosineAnnealing,opt_state,epoch::Int,total_epochs::Int,_loss;verbose::Bool=false)
   t = min(epoch,total_epochs)
   cos_val = cos(π * (t / total_epochs))
   new_lr = scheduler.lr_min + 0.5f0 * (scheduler.lr_max - scheduler.lr_min) * (1.0f0 + Float32(cos_val))
-  
+
   Optimisers.adjust!(opt_state,new_lr)
 end
 

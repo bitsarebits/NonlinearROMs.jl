@@ -11,13 +11,11 @@ are required.
 
 ## Installation
 
-`GridapROMs` is not a registered package, so it must be added as a `dev`
-dependency (or otherwise made resolvable) before instantiating this
-environment:
+`NonlinearROMs` is not a registered package, so it must be added as a `dev` dependency (or otherwise made resolvable) before instantiating this environment:
 
 ```julia
 using Pkg
-Pkg.develop(path="../GridapROMs.jl")   # or wherever your GridapROMs.jl checkout lives
+Pkg.develop(path="../NonlinearROMs.jl")
 Pkg.instantiate()
 ```
 
@@ -25,7 +23,6 @@ Pkg.instantiate()
 
 ```julia
 using GridapROMs
-using GridapROMs.RBSteady
 using NonlinearROMs
 
 res_reduction = NNHyperReduction(tol; nparams, sketch, compression)

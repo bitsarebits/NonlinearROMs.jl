@@ -1,3 +1,52 @@
+"""
+    RBSteady.reduced_operator(
+      solver::NeuralOpSolver,
+      feop::ODEParamOperator,
+      s::AbstractSnapshots
+    )
+
+Executes the **Offline Phase** for Neural Operators on transient (time-dependent) problems.
+It extracts the parameters, spatial coordinates, and the time grid from the snapshots `s` and the operator `feop` to build spatiotemporal input tensors.
+
+The resulting `NeuralRBOperator` contains a neural network trained to predict the physical field dynamically across the provided time steps.
+"""
+function RBSteady.reduced_operator(
+  solver::NeuralOpSolver,
+  feop::ODEParamOperator,
+  s::AbstractSnapshots
+  )
+
+  reduction = RBSteady.get_state_reduction(solver)
+  model,ps,st,norm_stats,max_u = train_neural_operator(reduction,feop,s)
+  NeuralRBOperator(feop,model,ps,st,norm_stats,max_u)
+end
+
+"""
+    RBSteady.reduced_operator(
+      solver::NeuralOpSolver,
+      feop::ODEParamOperator,
+      s::AbstractSnapshots,
+      pretrained_op::NeuralRBOperator;
+      update_stats::Bool = false
+    )
+
+Performs **Fine-Tuning (Continual or Transfer Learning)** on a previously trained Neural Operator for **transient (time-dependent) problems**.
+
+It extends the steady-state fine-tuning logic to accommodate spatiotemporal datasets. For a detailed explanation of the arguments, keyword arguments, and the `update_stats` behavior, please refer to the documentation of the steady-state `reduced_operator` fine-tuning method.
+"""
+function RBSteady.reduced_operator(
+  solver::NeuralOpSolver,
+  feop::ODEParamOperator,
+  s::AbstractSnapshots,
+  pretrained_op::NeuralRBOperator;
+  update_stats::Bool = false
+)
+
+  reduction = RBSteady.get_state_reduction(solver)
+  model,ps,st,norm_stats,max_u = train_neural_operator(reduction,feop,s,pretrained_op;update_stats=update_stats)
+  NeuralRBOperator(feop,model,ps,st,norm_stats,max_u)
+end
+
 function Algebra.solve(
   solver::NeuralOpSolver{<:Any,<:DeepONetReduction},
   op::NeuralRBOperator,
@@ -9,8 +58,8 @@ function Algebra.solve(
   ps = op.model_weights
   st = op.model_states
   max_u = op.max_u
-  strategy = solver.state_reduction.strategy
-  
+  strategy = RBSteady.get_state_reduction(solver).strategy
+
   branch_stats = op.norm_stats.branch
   trunk_stats = op.norm_stats.trunk
 
@@ -30,7 +79,7 @@ function Algebra.solve(
   N_time = length(t_grid)
 
   V = get_test(op.op)
-  x_raw = RBSteady.get_coords_with_order(V) # Shape: (D_phys,N_dofs)
+  x_raw = get_coords_with_order(V) # Shape: (D_phys,N_dofs)
   D_phys = size(x_raw,1)
   N_dofs = size(x_raw,2)
 
@@ -91,8 +140,8 @@ function Algebra.solve(
   ps = op.model_weights
   st = op.model_states
   max_u = op.max_u
-  strategy = solver.state_reduction.strategy
-  
+  strategy = RBSteady.get_state_reduction(solver).strategy
+
   u_in_stats = op.norm_stats.u_in
   y_in_stats = op.norm_stats.y_in
 
@@ -100,7 +149,7 @@ function Algebra.solve(
   param_realisation = get_params(r)
   raw_params = Float32.(matrix_of_params(param_realisation))
   n_samples = size(raw_params,2)
-  
+
   f_in_list = [Float32.(strategy.branch_sampler(raw_params[:,i])) for i in 1:n_samples]
   params_matrix = reduce(hcat,f_in_list)
   n_sensors = size(params_matrix,1)
@@ -110,7 +159,7 @@ function Algebra.solve(
   N_time = length(t_grid)
 
   V = get_test(op.op)
-  x_test = RBSteady.get_coords_with_order(V)
+  x_test = get_coords_with_order(V)
   D_phys = size(x_test,1)
   N_dofs = size(x_test,2)
 
@@ -161,7 +210,7 @@ function Algebra.solve(
   fe_data = ConsecutiveParamArray(pred_3d)
   dummy_red_data = ConsecutiveParamArray(zeros(Float64,1,n_samples))
 
-  x̂ = RBParamVector(dummy_red_data,fe_data) 
+  x̂ = RBParamVector(dummy_red_data,fe_data)
   stats = CostTracker(t,nruns=n_samples,name="NOMAD Transient Inference")
 
   return x̂,stats
