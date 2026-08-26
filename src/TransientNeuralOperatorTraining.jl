@@ -9,24 +9,24 @@ function train_neural_operator(
   # Data extraction
   target_data = Float32.(get_all_data(s))     # shape (N_dofs,N_samples,N_time)
 
-  realisation = get_realisation(s)
+  r = get_realisation(s)
 
   # Extract the spatial parameters
-  param_realisation = get_params(realisation)
+  param_realisation = get_params(r)
   raw_params = Float32.(matrix_of_params(param_realisation))
   n_samples = size(raw_params,2)
 
   params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
 
   # Time grid
-  t_grid = Float32.(get_times(realisation))
+  t_grid = Float32.(get_times(r))
 
   N_dofs = size(target_data,1)
   N_time = size(target_data,3)
 
   # Subsampling indices
-  idx_x = get_ids(strategy.sampler.space_sampler,N_dofs)
-  idx_t = get_ids(strategy.sampler.time_sampler,N_time)
+  idx_x = get_space_ids(strategy.sampler,N_dofs)
+  idx_t = get_time_ids(strategy.sampler,N_time)
   N_x_red = length(idx_x)
   N_t_red = length(idx_t)
   N_points = N_x_red * N_t_red
@@ -110,21 +110,21 @@ function train_neural_operator(
 
   # Data extraction
   target_data = Float32.(get_all_data(s))  # shape (N_dofs,N_samples,N_time)
-  realisation = get_realisation(s)
+  r = get_realisation(s)
 
-  param_realisation = get_params(realisation)
+  param_realisation = get_params(r)
   raw_params = Float32.(matrix_of_params(param_realisation))
   n_samples = size(raw_params,2)
 
   params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
 
-  t_grid = Float32.(get_times(realisation))
+  t_grid = Float32.(get_times(r))
 
   N_dofs = size(target_data,1)
   N_time = size(target_data,3)
 
-  idx_x = get_ids(strategy.sampler.space_sampler,N_dofs)
-  idx_t = get_ids(strategy.sampler.time_sampler,N_time)
+  idx_x = get_space_ids(strategy.sampler,N_dofs)
+  idx_t = get_time_ids(strategy.sampler,N_time)
   N_x_red = length(idx_x)
   N_t_red = length(idx_t)
   N_points = N_x_red * N_t_red
@@ -215,10 +215,10 @@ function train_neural_operator(
 
   # Data extraction
   target_data = Float32.(get_all_data(s))  # shape (N_dofs,N_samples,N_time)
-  realisation = get_realisation(s)
+  r = get_realisation(s)
 
   # Extract the spatial parameters (sensors or Branch input)
-  param_realisation = get_params(realisation)
+  param_realisation = get_params(r)
   raw_params = Float32.(matrix_of_params(param_realisation))
   n_samples = size(raw_params,2)
 
@@ -226,14 +226,14 @@ function train_neural_operator(
   n_sensors = size(params_matrix,1)
 
   # Time grid
-  t_grid = Float32.(get_times(realisation))
+  t_grid = Float32.(get_times(r))
 
   N_dofs = size(target_data,1)
   N_time = size(target_data,3)
 
   # Subsampling indices
-  idx_x = get_ids(strategy.sampler.space_sampler,N_dofs)
-  idx_t = get_ids(strategy.sampler.time_sampler,N_time)
+  idx_x = get_space_ids(strategy.sampler,N_dofs)
+  idx_t = get_time_ids(strategy.sampler,N_time)
   N_x_red = length(idx_x)
   N_t_red = length(idx_t)
 
@@ -326,22 +326,22 @@ function train_neural_operator(
 
   # Data Extraction
   target_data = Float32.(get_all_data(s))
-  realisation = get_realisation(s)
+  r = get_realisation(s)
 
-  param_realisation = get_params(realisation)
+  param_realisation = get_params(r)
   raw_params = Float32.(matrix_of_params(param_realisation))
   n_samples = size(raw_params,2)
 
   params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
   n_sensors = size(params_matrix,1)
 
-  t_grid = Float32.(get_times(realisation))
+  t_grid = Float32.(get_times(r))
 
   N_dofs = size(target_data,1)
   N_time = size(target_data,3)
 
-  idx_x = get_ids(strategy.sampler.space_sampler,N_dofs)
-  idx_t = get_ids(strategy.sampler.time_sampler,N_time)
+  idx_x = get_space_ids(strategy.sampler,N_dofs)
+  idx_t = get_time_ids(strategy.sampler,N_time)
   N_x_red = length(idx_x)
   N_t_red = length(idx_t)
 

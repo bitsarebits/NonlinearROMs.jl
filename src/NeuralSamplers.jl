@@ -95,6 +95,10 @@ function sample(s::TransientNeuralSampler,x::TransientSnapshots)
   sample(xpt,x,space_axis)
 end
 
+get_space_ids(s::NeuralSampler,args...) = get_ids(s.space_sampler,args...)
+get_param_ids(s::NeuralSampler,args...) = get_ids(s.param_sampler,args...)
+get_time_ids(s::NeuralSampler,args...) = get_ids(s.time_sampler,args...)
+
 # utils
 
 """
@@ -112,8 +116,7 @@ get_ids(s::Sampler{Nothing},n::Int) = 1:n
 for (f,g) in zip((:get_param_ids,:get_time_ids),(:num_params,:num_times))
   @eval begin
     function $f(s::Sampler{<:AbstractVector},x::Snapshots)
-      ids = s.strategy(x)
-      return ids
+      return s.strategy
     end
 
     function $f(s::Sampler{<:Integer},x::Snapshots)

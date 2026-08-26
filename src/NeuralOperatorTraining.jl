@@ -148,7 +148,6 @@ end
 function build_model(model::NOMAD)
   approximator_net = build_lux_chain(model.approximator_layers,model.activation)
   decoder_net = build_lux_chain(model.decoder_layers,model.activation)
-
   LuxNOMAD(approximator_net,decoder_net)
 end
 
@@ -235,11 +234,11 @@ function train_neural_operator(
   target_data_full = Float32.(get_all_data(s))
   N_dofs = size(target_data_full,1)
 
-  idx_x = get_ids(strategy.sampler.space_sampler,N_dofs)
+  idx_x = get_space_ids(strategy.sampler,N_dofs)
   target_data = @views target_data_full[idx_x,:]
 
-  realisation = get_realisation(s)
-  raw_params = Float32.(matrix_of_params(realisation))
+  r = get_realisation(s)
+  raw_params = Float32.(matrix_of_params(r))
   n_samples = size(raw_params,2)
 
   params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
@@ -302,11 +301,11 @@ function train_neural_operator(
   target_data_full = Float32.(get_all_data(s))
   N_dofs = size(target_data_full,1)
 
-  idx_x = get_ids(strategy.sampler.space_sampler,N_dofs)
+  idx_x = get_space_ids(strategy.sampler,N_dofs)
   target_data = @views target_data_full[idx_x,:]
 
-  realisation = get_realisation(s)
-  raw_params = Float32.(matrix_of_params(realisation))
+  r = get_realisation(s)
+  raw_params = Float32.(matrix_of_params(r))
   n_samples = size(raw_params,2)
 
   params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
@@ -383,11 +382,11 @@ function train_neural_operator(
   target_data_full = Float32.(get_all_data(s))
   N_dofs = size(target_data_full,1)
 
-  idx_x = get_ids(strategy.sampler.space_sampler,N_dofs)
+  idx_x = get_space_ids(strategy.sampler,N_dofs)
   N_x_red = length(idx_x)
 
-  realisation = get_realisation(s)
-  raw_params = Float32.(matrix_of_params(realisation))
+  r = get_realisation(s)
+  raw_params = Float32.(matrix_of_params(r))
   n_samples = size(raw_params,2)
 
   # Sensors extraction (like branch input in DeepONet)
@@ -468,11 +467,11 @@ function train_neural_operator(
   target_data_full = Float32.(get_all_data(s))
   N_dofs = size(target_data_full,1)
 
-  idx_x = get_ids(strategy.sampler.space_sampler,N_dofs)
+  idx_x = get_space_ids(strategy.sampler,N_dofs)
   N_x_red = length(idx_x)
 
-  realisation = get_realisation(s)
-  raw_params = Float32.(matrix_of_params(realisation))
+  r = get_realisation(s)
+  raw_params = Float32.(matrix_of_params(r))
   n_samples = size(raw_params,2)
 
   params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
