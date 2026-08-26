@@ -38,7 +38,7 @@ end
 @testset "Learning Rate Schedulers" begin
   # CosineAnnealing
   ca = CosineAnnealing(100,lr_max=1.0f0,lr_min=0.0f0)
-  @test get_initial_lr(ca) == 1.0f0
+  @test get_lr(ca) == 1.0f0
 
   opt_state = Optimisers.setup(Adam(1.0f0),[1.0f0])
   # Half training (50/100),cos(pi/2) = 0,lr = 0.5
@@ -47,7 +47,7 @@ end
 
   # ReduceLROnPlateau
   plat = ReduceLROnPlateau(patience=2,factor=0.5f0,min_lr=0.1f0,start_lr=1.0f0)
-  @test get_initial_lr(plat) == 1.0f0
+  @test get_lr(plat) == 1.0f0
 
   opt_state_plat = Optimisers.setup(Adam(1.0f0),[1.0f0])
 
@@ -126,12 +126,12 @@ end
   reffe = ReferenceFE(lagrangian,Float64,1)
 
   # Space with no boundary conditions -> 3 Free DoFs
-  # get_coords_with_order works on any SingleFieldFESpace: no special DoF
+  # get_coords works on any SingleFieldFESpace: no special DoF
   # ordering is required, since coordinates are mapped consistently with the
   # space's own free-dof numbering via direct interpolation.
   V = FESpace(model,reffe)
 
-  coords = get_coords_with_order(V)
+  coords = get_coords(V)
 
   @test size(coords) == (1,3) # (D_phys,N_dofs)
 
@@ -147,7 +147,7 @@ struct DummyScheduler <: NonlinearROMs.AbstractLRScheduler end
   dummy = DummyScheduler()
 
   # Should throw ErrorException if methods are not implemented
-  @test_throws ErrorException get_initial_lr(dummy)
+  @test_throws ErrorException get_lr(dummy)
   @test_throws ErrorException step_scheduler!(dummy,nothing,1,10,0.5f0)
 end
 

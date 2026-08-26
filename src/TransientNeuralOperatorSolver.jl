@@ -79,7 +79,7 @@ function Algebra.solve(
   N_time = length(t_grid)
 
   V = get_test(op.op)
-  x_raw = get_coords_with_order(V) # Shape: (D_phys,N_dofs)
+  x_raw = get_coords(V) # Shape: (D_phys,N_dofs)
   D_phys = size(x_raw,1)
   N_dofs = size(x_raw,2)
 
@@ -160,7 +160,7 @@ function Algebra.solve(
   N_time = length(t_grid)
 
   V = get_test(op.op)
-  x_test = get_coords_with_order(V)
+  x_test = get_coords(V)
   D_phys = size(x_test,1)
   N_dofs = size(x_test,2)
 

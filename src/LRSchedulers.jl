@@ -2,7 +2,7 @@ abstract type AbstractLRScheduler end
 
 # Helpers
 
-function get_initial_lr(s::AbstractLRScheduler)
+function get_lr(s::AbstractLRScheduler)
   @abstractmethod
 end
 
@@ -33,7 +33,7 @@ end
 
 CosineAnnealing(total_epochs;lr_max=0.001f0,lr_min=1f-6) = CosineAnnealing(total_epochs,lr_max,lr_min)
 
-get_initial_lr(s::CosineAnnealing) = s.lr_max
+get_lr(s::CosineAnnealing) = s.lr_max
 
 function step_scheduler!(s::CosineAnnealing,opt_state,epoch::Int,args...;kwargs...)
   t = min(epoch,s.total_epochs)
@@ -73,7 +73,7 @@ function ReduceLROnPlateau(;patience=100,factor=0.5f0,min_lr=1f-6,start_lr=0.001
   ReduceLROnPlateau(patience,factor,min_lr,Base.Ref(0),Base.Ref(Inf32),Base.Ref(start_lr))
 end
 
-get_initial_lr(s::ReduceLROnPlateau) = s.current_lr[]
+get_lr(s::ReduceLROnPlateau) = s.current_lr[]
 
 function step_scheduler!(s::ReduceLROnPlateau,opt_state,epoch,current_loss;verbose::Bool=false)
   if current_loss < s.best_loss[]

@@ -114,7 +114,7 @@ export AbstractLRScheduler
 export CosineAnnealing
 export ReduceLROnPlateau
 export step_scheduler!
-export get_initial_lr
+export get_lr
 include("LRSchedulers.jl")
 
 export TrainingLog
@@ -135,7 +135,7 @@ include("NeuralOperatorReductions.jl")
 export train_neural_operator
 export train_deeponet!
 export train_nomad!
-export get_coords_with_order
+export get_coords
 export resolve_batch_size
 export XDEV
 export CDEV

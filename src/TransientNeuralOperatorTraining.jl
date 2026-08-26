@@ -33,7 +33,7 @@ function train_neural_operator(
 
   # Coordinates extraction (Trunk input)
   V = get_test(feop)
-  coords_raw = get_coords_with_order(V) # Shape: (D_phys,N_dofs)
+  coords_raw = get_coords(V) # Shape: (D_phys,N_dofs)
   D_phys = size(coords_raw,1)
 
   # Spatio-Temporal coordinate matrix (D_phys + 1 for time,N_points)
@@ -81,7 +81,7 @@ function train_neural_operator(
   # Dataloader and Lux setup
   bs = resolve_batch_size(strategy.batch_size,n_samples)
   dataloader =
-    MLUtils.DataLoader((params_matrix,u_train); batchsize=bs,shuffle=true,partial=false)
+    MLUtils.DataLoader((params_matrix,u_train);batchsize=bs,shuffle=true,partial=false)
 
   x_data_dev = x_train |> XDEV
 
@@ -89,7 +89,7 @@ function train_neural_operator(
   Random.seed!(rng,42)
   ps,st = Lux.setup(rng,deepONet) |> XDEV
 
-  initial_lr = get_initial_lr(strategy.lr_scheduler)
+  initial_lr = get_lr(strategy.lr_scheduler)
 
   opt = Optimisers.Adam(initial_lr)
   train_state = Lux.Training.TrainState(deepONet,ps,st,opt)
@@ -140,7 +140,7 @@ function train_neural_operator(
   N_points = N_x_red * N_t_red
 
   V = get_test(feop)
-  coords_raw = get_coords_with_order(V)
+  coords_raw = get_coords(V)
   D_phys = size(coords_raw,1)
 
   x_train = zeros(Float32,D_phys + 1,N_points)
@@ -200,11 +200,11 @@ function train_neural_operator(
 
   # Dataloader and Optimizer setup
   bs = resolve_batch_size(strategy.batch_size,n_samples)
-  dataloader = MLUtils.DataLoader((params_matrix,u_train); batchsize=bs,shuffle=true,partial=false)
+  dataloader = MLUtils.DataLoader((params_matrix,u_train);batchsize=bs,shuffle=true,partial=false)
 
   x_data_dev = x_train |> XDEV
 
-  initial_lr = get_initial_lr(strategy.lr_scheduler)
+  initial_lr = get_lr(strategy.lr_scheduler)
   opt = Optimisers.Adam(initial_lr)
   train_state = Lux.Training.TrainState(deepONet,ps,st,opt)
 
@@ -260,7 +260,7 @@ function train_neural_operator(
 
   # Coordinates extraction (Trunk input)
   V = get_test(feop)
-  coords_raw = get_coords_with_order(V) # Shape: (D_phys,N_dofs)
+  coords_raw = get_coords(V) # Shape: (D_phys,N_dofs)
   x_red = @views coords_raw[:,idx_x]
   D_phys = size(x_red,1)
 
@@ -321,7 +321,7 @@ function train_neural_operator(
   Random.seed!(rng,42)
   ps,st = Lux.setup(rng,nomad_net) |> XDEV
 
-  initial_lr = get_initial_lr(strategy.lr_scheduler)
+  initial_lr = get_lr(strategy.lr_scheduler)
   opt = Optimisers.Adam(initial_lr)
   train_state = Lux.Training.TrainState(nomad_net,ps,st,opt)
 
@@ -376,7 +376,7 @@ function train_neural_operator(
   N_tot = N_points * n_samples
 
   V = get_test(feop)
-  coords_raw = get_coords_with_order(V)
+  coords_raw = get_coords(V)
   x_red = @views coords_raw[:,idx_x]
   D_phys = size(x_red,1)
 
@@ -438,7 +438,7 @@ function train_neural_operator(
     partial=false
   )
 
-  initial_lr = get_initial_lr(strategy.lr_scheduler)
+  initial_lr = get_lr(strategy.lr_scheduler)
   opt = Optimisers.Adam(initial_lr)
   train_state = Lux.Training.TrainState(nomad_net,ps,st,opt)
 

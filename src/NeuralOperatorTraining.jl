@@ -7,12 +7,16 @@ function resolve_batch_size(batch_config::Int,total_samples::Int)
   return batch_config <= 0 ? total_samples : min(batch_config,total_samples)
 end
 
-function compute_zscore_stats(data::AbstractMatrix)
+function compute_zscore_stats(data::AbstractMatrix;normalise=false)
   μ = mean(data,dims=2)
   σ = std(data,dims=2)
   # Avoid dividing by zero if a feature is constant
   for i in eachindex(σ)
     iszero(σ[i]) && (σ[i] = 1.0f0)
+  end
+  if normalise
+    data .-= μ
+    data ./= σ
   end
   return (μ=Float32.(μ),σ=Float32.(σ))
 end
@@ -37,7 +41,7 @@ function sample_branch_inputs(branch_sampler,raw_params::AbstractMatrix)
 end
 
 """
-    get_coords_with_order(V::SingleFieldFESpace) -> Matrix{Float32}
+    get_coords(V::SingleFieldFESpace) -> Matrix{Float32}
 
 Extracts the physical coordinates of the free DoFs of `V`, shaped
 `(D_phys, N_dofs)` and indexed consistently with `V`'s own free-dof numbering
@@ -46,37 +50,39 @@ the mapping is obtained by directly interpolating the coordinate field onto
 `V`, it is valid for any `SingleFieldFESpace` -- no special DoF ordering is
 required.
 """
-function get_coords_with_order(V::SingleFieldFESpace)
-  # Retrieve the underlying triangulation and its physical dimensionality (1D,2D,3D)
+function get_coords(V::SingleFieldFESpace)
+  order = get_polynomial_orders(V)
   trian = get_triangulation(V)
-  D_phys = length(Gridap.Geometry.get_node_coordinates(trian)[1])
+  model = get_background_model(trian)
+  points = get_coords(model,order)
+  stack(p -> collect(p.data),vec(points))
+end
 
-  # Get the exact number of free DoFs (automatically excluding Dirichlet boundaries)
-  N_dofs = num_free_dofs(V)
-
-  # Initialize the tensor that will feed the Trunk Net: shape (D_phys,N_dofs)
-  x_raw = zeros(Float32,D_phys,N_dofs)
-
-  # Extract coordinates dimension by dimension. This avoids TypeErrors
-  # when interpolating a physical vector (Point) into a purely scalar FESpace.
-  for d in 1:D_phys
-    # Define a scalar spatial function for the d-th physical dimension
-    coord_d(x) = x[d]
-
-    # Interpolate the coordinate field over the entire FESpace.
-    # This maps the physical space to the algebraic DoF numbering.
-    coord_fn = interpolate_everywhere(coord_d,V)
-
-    # Extract only the values corresponding to the free DoFs
-    free_coords = get_free_dof_values(coord_fn)
-
-    # Populate the corresponding row in our Trunk Net input tensor
-    for i in 1:N_dofs
-      x_raw[d,i] = Float32(free_coords[i])
+function get_coords(model::CartesianDiscreteModel{D},orders::NTuple{D,Int}) where D 
+  desc = get_cartesian_descriptor(model)
+  cells = CartesianIndices(desc.partition)
+  nodes = CartesianIndices(orders .* desc.partition .+ 1 .- desc.isperiodic)
+  coords = Array{Point{D,Float64}}(undef,size(nodes))
+  for cell in cells
+    first_new_node = orders .* (Tuple(cell) .- 1) .+ 1
+    nodes_range = map(enumerate(first_new_node)) do (i,ni)
+      ni:(ni+orders[i])
+    end
+    for inode in Iterators.product(nodes_range...)
+      _is_periodic_node(inode,nodes) && continue
+      coords[inode...] = Point(ntuple(d -> desc.origin[d] + (inode[d]-1)*desc.sizes[d],Val{D}()))
     end
   end
+  return coords
+end
 
-  return x_raw
+function _is_periodic_node(inode,nodes)
+  try
+    nodes[inode...]
+    return false
+  catch
+    return true
+  end
 end
 
 # Build model
@@ -144,7 +150,7 @@ end
 function train_deeponet!(train_state,dataloader,x_data_dev,lr_scheduler;logger::TrainingLog)
   init!(logger)
 
-  Reactant.with_config(; dot_general_precision=Reactant.PrecisionConfig.HIGH) do
+  Reactant.with_config(;dot_general_precision=Reactant.PrecisionConfig.HIGH) do
     for epoch = 1:logger.max_epochs
       local current_loss = 0.0f0
 
@@ -164,7 +170,7 @@ function train_deeponet!(train_state,dataloader,x_data_dev,lr_scheduler;logger::
 
       step_scheduler!(lr_scheduler,train_state.optimizer_state,epoch,current_loss;verbose=logger.verbose)
 
-      update!(logger, epoch, current_loss)
+      update!(logger,epoch,current_loss)
     end
   end
 
@@ -175,7 +181,7 @@ end
 function train_nomad!(train_state,dataloader,lr_scheduler;logger::TrainingLog)
   init!(logger)
 
-  Reactant.with_config(; dot_general_precision=Reactant.PrecisionConfig.HIGH) do
+  Reactant.with_config(;dot_general_precision=Reactant.PrecisionConfig.HIGH) do
     for epoch in 1:logger.max_epochs
       local current_loss = 0.0f0
 
@@ -199,7 +205,7 @@ function train_nomad!(train_state,dataloader,lr_scheduler;logger::TrainingLog)
 
       step_scheduler!(lr_scheduler,train_state.optimizer_state,epoch,current_loss;verbose=logger.verbose)
 
-      update!(logger, epoch, current_loss)
+      update!(logger,epoch,current_loss)
     end
   end
 
@@ -214,6 +220,7 @@ function train_neural_operator(
   feop::ParamOperator,
   s::AbstractSnapshots
   )
+
   strategy = red.strategy
 
   # Data extraction
@@ -236,17 +243,12 @@ function train_neural_operator(
 
   # DoF coordinates extraction (Trunk input)
   V = get_test(feop)
-  x_train_full = get_coords_with_order(V) # shape: (D_phys,full_N_dofs)
+  x_train_full = get_coords(V) # shape: (D_phys,full_N_dofs)
   x_train = @views x_train_full[:,idx_x]
 
   # Input normalization
-  branch_stats = compute_zscore_stats(params_matrix)
-  params_matrix .-= branch_stats.μ
-  params_matrix ./= branch_stats.σ
-
-  trunk_stats = compute_zscore_stats(x_train)
-  x_train .-= trunk_stats.μ
-  x_train ./= trunk_stats.σ
+  branch_stats = compute_zscore_stats(params_matrix;normalise=true)
+  trunk_stats = compute_zscore_stats(x_train;normalise=true)
 
   # Building the DeepONet
   deepONet = build_model(strategy.model)
@@ -262,11 +264,10 @@ function train_neural_operator(
 
   x_data_dev = x_train |> XDEV
 
-  rng = Random.default_rng()
-  Random.seed!(rng,42)
-  ps,st = Lux.setup(rng,deepONet) |> XDEV
+  Random.seed!(42)
+  ps,st = Lux.setup(Random.default_rng(),deepONet) |> XDEV
 
-  initial_lr = get_initial_lr(strategy.lr_scheduler)
+  initial_lr = get_lr(strategy.lr_scheduler)
 
   opt = Optimisers.Adam(initial_lr)
   train_state = Lux.Training.TrainState(deepONet,ps,st,opt)
@@ -275,8 +276,7 @@ function train_neural_operator(
   logger = TrainingLog("DeepONet",strategy.epochs;verbose=strategy.verbose,print_every=strategy.print_every)
 
   # Executing the pipeline
-  ps_trained,st_trained =
-    train_deeponet!(train_state,dataloader,x_data_dev,strategy.lr_scheduler;logger=logger)
+  ps_trained,st_trained = train_deeponet!(train_state,dataloader,x_data_dev,strategy.lr_scheduler;logger=logger)
 
   st_test = Lux.testmode(st_trained) |> CDEV
 
@@ -292,6 +292,7 @@ function train_neural_operator(
   pretrained_op::NeuralRBOperator;
   update_stats::Bool = false
   )
+
   strategy = red.strategy
 
   # Data extraction
@@ -309,7 +310,7 @@ function train_neural_operator(
   params_matrix = sample_branch_inputs(strategy.branch_sampler,raw_params)
 
   V = get_test(feop)
-  x_train_full = get_coords_with_order(V)
+  x_train_full = get_coords(V)
   x_train = @views x_train_full[:,idx_x]
 
   nbranch_in = size(params_matrix,1)
@@ -357,7 +358,7 @@ function train_neural_operator(
 
   x_data_dev = x_train |> XDEV
 
-  initial_lr = get_initial_lr(strategy.lr_scheduler)
+  initial_lr = get_lr(strategy.lr_scheduler)
   opt = Optimisers.Adam(initial_lr) # New LR
   train_state = Lux.Training.TrainState(deepONet,ps,st,opt)
 
@@ -380,6 +381,7 @@ function train_neural_operator(
   feop::ParamOperator,
   s::AbstractSnapshots
   )
+
   strategy = red.strategy
 
   # Data extraction
@@ -400,7 +402,7 @@ function train_neural_operator(
 
   # DoF coordinates extraction (like trunk input in DeepONet)
   V = get_test(feop)
-  x_train_full = get_coords_with_order(V) # shape: (D_phys,full_N_dofs)
+  x_train_full = get_coords(V) # shape: (D_phys,full_N_dofs)
   x_red = @views x_train_full[:,idx_x]
   D_phys = size(x_red,1)
 
@@ -415,8 +417,8 @@ function train_neural_operator(
   @views for i in 1:n_samples
     sensor_vals = params_matrix[:,i]
     for (x_idx_reduced,x_idx_full) in enumerate(idx_x)
-      u_in[:,col_idx]  .= sensor_vals
-      y_in[:,col_idx]  .= x_red[:,x_idx_reduced]
+      u_in[:,col_idx] .= sensor_vals
+      y_in[:,col_idx] .= x_red[:,x_idx_reduced]
       v_out[1,col_idx] = target_data_full[x_idx_full,i]
       col_idx += 1
     end
@@ -426,13 +428,8 @@ function train_neural_operator(
   max_u = maximum(abs,v_out)
   v_out ./= max_u
 
-  u_in_stats = compute_zscore_stats(u_in)
-  u_in .-= u_in_stats.μ
-  u_in ./= u_in_stats.σ
-
-  y_in_stats = compute_zscore_stats(y_in)
-  y_in .-= y_in_stats.μ
-  y_in ./= y_in_stats.σ
+  u_in_stats = compute_zscore_stats(u_in;normalise=true)
+  y_in_stats = compute_zscore_stats(y_in;normalise=true)
 
   # Building the NOMAD model
   nomad_net = build_model(strategy.model)
@@ -446,11 +443,10 @@ function train_neural_operator(
     partial=false
   )
 
-  rng = Random.default_rng()
-  Random.seed!(rng,42)
-  ps,st = Lux.setup(rng,nomad_net) |> XDEV
+  Random.seed!(42)
+  ps,st = Lux.setup(Random.default_rng(),nomad_net) |> XDEV
 
-  initial_lr = get_initial_lr(strategy.lr_scheduler)
+  initial_lr = get_lr(strategy.lr_scheduler)
   opt = Optimisers.Adam(initial_lr)
   train_state = Lux.Training.TrainState(nomad_net,ps,st,opt)
 
@@ -477,6 +473,7 @@ function train_neural_operator(
   pretrained_op::NeuralRBOperator;
   update_stats::Bool = false
   )
+
   strategy = red.strategy
 
   # Data extraction
@@ -494,7 +491,7 @@ function train_neural_operator(
   n_sensors = size(params_matrix,1)
 
   V = get_test(feop)
-  x_train_full = get_coords_with_order(V)
+  x_train_full = get_coords(V)
   x_red = @views x_train_full[:,idx_x]
   D_phys = size(x_red,1)
 
@@ -509,8 +506,8 @@ function train_neural_operator(
   @views for i in 1:n_samples
     sensor_vals = params_matrix[:,i]
     for (x_idx_reduced,x_idx_full) in enumerate(idx_x)
-      u_in[:,col_idx]  .= sensor_vals
-      y_in[:,col_idx]  .= x_red[:,x_idx_reduced]
+      u_in[:,col_idx] .= sensor_vals
+      y_in[:,col_idx] .= x_red[:,x_idx_reduced]
       v_out[1,col_idx] = target_data_full[x_idx_full,i]
       col_idx += 1
     end
@@ -555,7 +552,7 @@ function train_neural_operator(
     partial=false
   )
 
-  initial_lr = get_initial_lr(strategy.lr_scheduler)
+  initial_lr = get_lr(strategy.lr_scheduler)
   opt = Optimisers.Adam(initial_lr)
   train_state = Lux.Training.TrainState(nomad_net,ps,st,opt)
 
