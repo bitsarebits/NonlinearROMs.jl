@@ -108,10 +108,6 @@ function Algebra.solve(
   r::Realisation
   ) where A
 
-  deepONet = op.model
-  ps = op.model_weights
-  st = op.model_states
-  max_u = op.max_u
   strategy = get_state_reduction(solver) |> get_strategy
 
   branch_stats = op.norm_stats.branch
@@ -134,11 +130,11 @@ function Algebra.solve(
 
   # Inference Execution
   t = @timed begin
-    pred_cpu,_ = deepONet((f_in,x_in),ps,st)
+    pred_cpu,_ = op.model((f_in,x_in),op.model_weights,op.model_states)
   end
 
   # Denormalize output
-  pred_cpu .*= max_u
+  pred_cpu .*= op.max_u
 
   x̂ = Snapshots(ConsecutiveParamArray(pred_cpu),r)
   stats = CostTracker(t,nruns=n_samples,name="DeepONet Inference")
@@ -153,8 +149,6 @@ function Algebra.solve(
   ) where A
 
   nomad_net = op.model
-  ps = op.model_weights
-  st = op.model_states
   max_u = op.max_u
   strategy = get_state_reduction(solver) |> get_strategy
 
@@ -195,7 +189,7 @@ function Algebra.solve(
 
   # Inference
   t = @timed begin
-    pred_cpu,_ = nomad_net((u_in,y_in),ps,st)
+    pred_cpu,_ = nomad_net((u_in,y_in),op.model_weights,op.model_states)
   end
 
   # Denormalization

@@ -37,61 +37,6 @@ function normalise!(data::AbstractMatrix,law::NamedTuple)
   data 
 end
 
-"""
-    get_coords(V::SingleFieldFESpace) -> Array{Point{D,Float64}}
-
-Extracts the physical coordinates of the free DoFs of `V`, indexed consistently
-with `V`'s own free-dof numbering (the same numbering used by
-`get_all_data`/`get_free_dof_values` on `V`). Since the mapping is obtained by
-directly interpolating the coordinate field onto `V`, it is valid for any
-`SingleFieldFESpace` -- no special DoF ordering is required. Use
-`sample(sampler::NeuralSampler,get_coords(V))` to subsample and stack the
-result into a `(D_phys,N_dofs)` `Matrix{Float32}`.
-"""
-function get_coords(V::SingleFieldFESpace)
-  order = get_polynomial_orders(V)
-  trian = get_triangulation(V)
-  model = get_background_model(trian)
-  get_coords(model,order)
-end
-
-function get_coords(model::CartesianDiscreteModel{D},orders::NTuple{D,Int}) where D 
-  desc = get_cartesian_descriptor(model)
-  cells = CartesianIndices(desc.partition)
-  nodes = CartesianIndices(orders .* desc.partition .+ 1 .- desc.isperiodic)
-  coords = Array{Point{D,Float64}}(undef,size(nodes))
-  for cell in cells
-    first_new_node = orders .* (Tuple(cell) .- 1) .+ 1
-    nodes_range = map(enumerate(first_new_node)) do (i,ni)
-      ni:(ni+orders[i])
-    end
-    for inode in Iterators.product(nodes_range...)
-      _is_periodic_node(inode,nodes) && continue
-      coords[inode...] = Point(ntuple(d -> desc.origin[d] + (inode[d]-1)*desc.sizes[d],Val{D}()))
-    end
-  end
-  return coords
-end
-
-function _is_periodic_node(inode,nodes)
-  try
-    nodes[inode...]
-    return false
-  catch
-    return true
-  end
-end
-
-"""
-    coords_matrix(V::SingleFieldFESpace) -> Matrix{Float32}
-
-Full-resolution counterpart of `sample(sampler::NeuralSampler,get_coords(V))`: stacks
-every DoF coordinate of `V` (no spatial subsampling) into a `(D_phys,N_dofs)` matrix.
-Used at inference time, where predictions are required at every DoF regardless of the
-spatial subsampling used during training.
-"""
-coords_matrix(V::SingleFieldFESpace) = Float32.(stack(p -> collect(p.data),vec(get_coords(V))))
-
 # Build model
 
 function build_lux_chain(layers::Tuple,activation)
@@ -153,15 +98,24 @@ end
 
 # Training loop
 
-function train_deeponet!(train_state,dataloader,x_data_dev,lr_scheduler;logger::TrainingLog)
+"""
+    train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger::TrainingLog)
+
+Generic Lux/Reactant/Enzyme training loop shared by DeepONet and NOMAD. `to_device_batch`
+maps one raw batch yielded by `dataloader` to the `(inputs,target)` pair (already moved to
+`XDEV`) expected by `Lux.Training.single_train_step!`; this is the only piece that differs
+between the two architectures (DeepONet pairs each batch with a fixed set of trunk query
+points, NOMAD's coordinates are already part of the per-row batch).
+"""
+function train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger::TrainingLog)
   init!(logger)
 
   Reactant.with_config(;dot_general_precision=Reactant.PrecisionConfig.HIGH) do
-    for epoch = 1:logger.max_epochs
+    for epoch in 1:logger.max_epochs
       local current_loss = 0.0f0
 
-      for (f_batch,u_batch) in dataloader
-        batch_dev = ((f_batch |> XDEV,x_data_dev),u_batch |> XDEV)
+      for raw_batch in dataloader
+        batch_dev = to_device_batch(raw_batch)
 
         _,loss_val,_,train_state = Lux.Training.single_train_step!(
           Lux.AutoEnzyme(),
@@ -184,39 +138,362 @@ function train_deeponet!(train_state,dataloader,x_data_dev,lr_scheduler;logger::
   return train_state.parameters,train_state.states
 end
 
+function train_deeponet!(train_state,dataloader,x_data_dev,lr_scheduler;logger::TrainingLog)
+  to_device_batch((f_batch,u_batch)) = ((f_batch |> XDEV,x_data_dev),u_batch |> XDEV)
+  train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger)
+end
+
 function train_nomad!(train_state,dataloader,lr_scheduler;logger::TrainingLog)
+  to_device_batch(((u_batch,y_batch),v_batch)) = ((u_batch |> XDEV,y_batch |> XDEV),v_batch |> XDEV)
+  train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger)
+end
+
+# Regression networks (hyper-reduction): MultiLayerPerceptron / AutoEncoder
+
+"""
+    struct TrainedModel{C,P,S} <: NeuralNetwork
+      chain::C
+      ps::P
+      st::S
+    end
+
+A trained Lux `chain` bundled with its optimised parameters/states, evaluable
+as `(a::TrainedModel)(x::AbstractMatrix) -> AbstractMatrix` via the standard
+`Arrays.evaluate!`/`return_cache` interface. Returned by [`TrainedNeuralNetwork`](@ref)
+for [`MultiLayerPerceptron`](@ref) strategies.
+"""
+struct TrainedModel{C,P,S} <: NeuralNetwork
+  chain::C
+  ps::P
+  st::S
+end
+
+Arrays.return_cache(a::TrainedModel,x::AbstractMatrix) = nothing
+
+function Arrays.evaluate!(cache,a::TrainedModel,x::AbstractMatrix)
+  first(a.chain(Float32.(x),a.ps,a.st))
+end
+
+"""
+    TrainedNeuralNetwork(strategy::NeuralOpStrategy,r::AbstractRealisation,coeff) -> NeuralNetwork
+
+Builds and trains a [`NeuralNetwork`](@ref) from `strategy.model`'s recipe and
+`(r,coeff)` data, through the same Lux/Reactant/Enzyme pipeline used for DeepONet/NOMAD.
+For a [`MultiLayerPerceptron`](@ref), the input/output dimensions are inferred from
+`r`/`coeff` and appended to `strategy.model.hidden_layers`; for an [`AutoEncoder`](@ref),
+`r` is ignored and the network is trained to reconstruct `coeff`.
+"""
+function TrainedNeuralNetwork(strategy::NeuralOpStrategy{<:MultiLayerPerceptron},r::AbstractRealisation,coeff)
+  x = Float32.(matrix_of_params(r))
+  y = Float32.(_get_data(coeff))
+  nin,nout = size(x,1),size(y,1)
+  n_samples = size(x,2)
+
+  chain = build_lux_chain((nin,strategy.model.hidden_layers...,nout),strategy.model.activation)
+
+  bs = resolve_batch_size(strategy.batch_size,n_samples)
+  dataloader = MLUtils.DataLoader((x,y);batchsize=bs,shuffle=true,partial=false)
+
+  Random.seed!(42)
+  ps,st = Lux.setup(Random.default_rng(),chain) |> XDEV
+  train_state = Lux.Training.TrainState(chain,ps,st,strategy.optimiser.opt)
+
+  to_device_batch((xb,yb)) = (xb |> XDEV,yb |> XDEV)
+  ps_trained,st_trained = train_model!(
+    train_state,dataloader,strategy.optimiser.lr_scheduler,to_device_batch;logger=strategy.trainlog
+  )
+
+  TrainedModel(chain,ps_trained |> CDEV,Lux.testmode(st_trained) |> CDEV)
+end
+
+"""
+    struct TrainedAutoEncoder{C,P,S} <: NeuralNetwork
+      chain::C
+      ps::P
+      st::S
+    end
+
+A trained [`AutoEncoder`](@ref), `chain = Lux.Chain(encoder,decoder)`.
+`(a::TrainedAutoEncoder)(z)` applies the **decoder** (latent → high-dim), matching
+`evaluate!`'s contract; use [`encode`](@ref)/[`decode`](@ref) to access either half directly.
+"""
+struct TrainedAutoEncoder{C,P,S} <: NeuralNetwork
+  chain::C
+  ps::P
+  st::S
+end
+
+Arrays.return_cache(a::TrainedAutoEncoder,x::AbstractMatrix) = nothing
+
+function Arrays.evaluate!(cache,a::TrainedAutoEncoder,z::AbstractMatrix)
+  decode(a,z)
+end
+
+function encode(a::TrainedAutoEncoder,X::AbstractMatrix)
+  first(a.chain.layers.layer_1(Float32.(X),a.ps.layer_1,a.st.layer_1))
+end
+
+function decode(a::TrainedAutoEncoder,Z::AbstractMatrix)
+  first(a.chain.layers.layer_2(Float32.(Z),a.ps.layer_2,a.st.layer_2))
+end
+
+function TrainedNeuralNetwork(strategy::NeuralOpStrategy{<:AutoEncoder},::AbstractRealisation,coeff)
+  X = Float32.(_get_data(coeff))
+  nin = size(X,1)
+  n_samples = size(X,2)
+
+  hidden = strategy.model.hidden_layers[1:end-1]
+  latent_dim = last(strategy.model.hidden_layers)
+  encoder = build_lux_chain((nin,hidden...,latent_dim),strategy.model.activation)
+  decoder = build_lux_chain((latent_dim,reverse(hidden)...,nin),strategy.model.activation)
+  chain = Lux.Chain(encoder,decoder)
+
+  bs = resolve_batch_size(strategy.batch_size,n_samples)
+  dataloader = MLUtils.DataLoader((X,X);batchsize=bs,shuffle=true,partial=false)
+
+  Random.seed!(42)
+  ps,st = Lux.setup(Random.default_rng(),chain) |> XDEV
+  train_state = Lux.Training.TrainState(chain,ps,st,strategy.optimiser.opt)
+
+  to_device_batch((xb,yb)) = (xb |> XDEV,yb |> XDEV)
+  ps_trained,st_trained = train_model!(
+    train_state,dataloader,strategy.optimiser.lr_scheduler,to_device_batch;logger=strategy.trainlog
+  )
+
+  TrainedAutoEncoder(chain,ps_trained |> CDEV,Lux.testmode(st_trained) |> CDEV)
+end
+
+"""
+    struct TrainedAutoDecoder{D,P,S,L} <: NeuralNetwork
+      decoder::D
+      ps::P
+      st::S
+      latent_codes::L
+    end
+
+A trained [`AutoDecoder`](@ref). `latent_codes[:,i]` is the learned latent
+representation of the `i`-th training snapshot; `evaluate!` applies the decoder
+(`latent_dim × k → n_h × k`). Use [`infer_latent`](@ref) to fit a latent code for
+an unseen snapshot.
+"""
+struct TrainedAutoDecoder{D,P,S,L} <: NeuralNetwork
+  decoder::D
+  ps::P
+  st::S
+  latent_codes::L
+end
+
+Arrays.return_cache(a::TrainedAutoDecoder,z::AbstractMatrix) = nothing
+
+function Arrays.evaluate!(cache,a::TrainedAutoDecoder,z::AbstractMatrix)
+  first(a.decoder(Float32.(z),a.ps,a.st))
+end
+
+"""
+    struct LatentCodeLayer{A<:AbstractMatrix} <: Lux.AbstractLuxLayer
+      init_codes::A
+    end
+
+A Lux layer with no real input: it ignores whatever it is called with and returns its
+`(latent_dim,n_train)` parameter matrix unchanged, so the per-sample latent codes of an
+[`AutoDecoder`](@ref) are optimised as ordinary Lux parameters jointly with the decoder.
+"""
+struct LatentCodeLayer{A<:AbstractMatrix} <: Lux.AbstractLuxLayer
+  init_codes::A
+end
+
+Lux.initialparameters(rng::Random.AbstractRNG,l::LatentCodeLayer) = (codes=copy(l.init_codes),)
+Lux.initialstates(rng::Random.AbstractRNG,l::LatentCodeLayer) = NamedTuple()
+
+(l::LatentCodeLayer)(x,ps,st) = ps.codes,st
+
+function TrainedNeuralNetwork(strategy::NeuralOpStrategy{<:AutoDecoder},::AbstractRealisation,coeff)
+  X = Float32.(_get_data(coeff))
+  nin = size(X,1)
+  n_train = size(X,2)
+
+  hidden = strategy.model.hidden_layers[1:end-1]
+  latent_dim = last(strategy.model.hidden_layers)
+  decoder = build_lux_chain((latent_dim,reverse(hidden)...,nin),strategy.model.activation)
+
+  Random.seed!(42)
+  Z0 = randn(Float32,latent_dim,n_train) .* 0.01f0
+  chain = Lux.Chain(LatentCodeLayer(Z0),decoder)
+
+  # Joint decoder + latent-code optimisation is inherently full-batch: every
+  # column of the latent-code parameter must be updated on every step.
+  dataloader = MLUtils.DataLoader((X,X);batchsize=n_train,shuffle=false,partial=false)
+
+  ps,st = Lux.setup(Random.default_rng(),chain) |> XDEV
+  train_state = Lux.Training.TrainState(chain,ps,st,strategy.optimiser.opt)
+
+  to_device_batch((xb,yb)) = (xb |> XDEV,yb |> XDEV)
+  ps_trained,st_trained = train_model!(
+    train_state,dataloader,strategy.optimiser.lr_scheduler,to_device_batch;logger=strategy.trainlog
+  )
+
+  ps_trained_cdev = ps_trained |> CDEV
+  TrainedAutoDecoder(
+    decoder,ps_trained_cdev.layer_2,Lux.testmode(st_trained).layer_2 |> CDEV,ps_trained_cdev.layer_1.codes
+  )
+end
+
+"""
+    infer_latent(a::TrainedAutoDecoder,x_target::AbstractVector,strategy::NeuralOpStrategy) -> AbstractVector
+
+Fit a latent code `z` for an unseen snapshot `x_target` by minimising the mean
+squared reconstruction error with the decoder weights fixed, using `strategy.optimiser.opt`
+and `strategy.epochs`.
+"""
+function infer_latent(a::TrainedAutoDecoder,x_target::AbstractVector,strategy::NeuralOpStrategy)
+  latent_dim = size(a.latent_codes,1)
+  T = Float32
+  z = randn(T,latent_dim) .* T(0.01)
+  X_t = reshape(T.(x_target),:,1)
+  opt_state = Optimisers.setup(strategy.optimiser.opt,z)
+  for _ in 1:strategy.epochs
+    grad = ForwardDiff.gradient(z) do z_
+      X̂ = first(a.decoder(reshape(z_,:,1),a.ps,a.st))
+      sum(abs2,X̂ .- X_t)/length(X_t)
+    end
+    opt_state,z = Optimisers.update!(opt_state,z,grad)
+  end
+  z
+end
+
+# VariationalAutoEncoder: reparameterisation trick + KL loss. Trained eagerly on
+# CPU (no Reactant/XLA tracing), since the reparameterisation step samples fresh
+# `randn` values on every forward pass -- under XLA tracing those would be baked
+# in as a constant at compile time instead of resampled at each call.
+
+struct VAELayer{E,D} <: Lux.AbstractLuxContainerLayer{(:encoder,:decoder)}
+  encoder::E
+  decoder::D
+  latent_dim::Int
+end
+
+function (m::VAELayer)(x,ps,st)
+  enc_out,st_enc = m.encoder(x,ps.encoder,st.encoder)
+  μ = enc_out[1:m.latent_dim,:]
+  log_var = enc_out[m.latent_dim+1:end,:]
+  ε = randn(eltype(μ),size(μ))
+  z = μ .+ ε .* exp.(log_var ./ 2)
+  x̂,st_dec = m.decoder(z,ps.decoder,st.decoder)
+  out = vcat(x̂,μ,log_var)
+  return out,(encoder=st_enc,decoder=st_dec)
+end
+
+function train_vae!(train_state,dataloader,lr_scheduler,loss_fn;logger::TrainingLog)
   init!(logger)
 
-  Reactant.with_config(;dot_general_precision=Reactant.PrecisionConfig.HIGH) do
-    for epoch in 1:logger.max_epochs
-      local current_loss = 0.0f0
+  for epoch in 1:logger.max_epochs
+    local current_loss = 0.0f0
 
-      for ((u_batch,y_batch),v_batch) in dataloader
-        # Single concatenated tensor (Sensors + Coordinates)
-        batch_dev = (
-          (u_batch |> XDEV,y_batch |> XDEV),
-          v_batch |> XDEV
-        )
-
-        _,loss_val,_,train_state = Lux.Training.single_train_step!(
-          Lux.AutoEnzyme(),
-          Lux.MSELoss(),
-          batch_dev,
-          train_state;
-          return_gradients=Val(false)
-        )
-        current_loss += Float32(loss_val)
-      end
-      current_loss /= length(dataloader)
-
-      step_scheduler!(lr_scheduler,train_state.optimizer_state,epoch,current_loss;verbose=logger.verbose)
-
-      update!(logger,epoch,current_loss)
+    for x_batch in dataloader
+      _,loss_val,_,train_state = Lux.Training.single_train_step!(
+        Lux.AutoEnzyme(),
+        loss_fn,
+        x_batch,
+        train_state;
+        return_gradients=Val(false)
+      )
+      current_loss += Float32(loss_val)
     end
+    current_loss /= length(dataloader)
+
+    step_scheduler!(lr_scheduler,train_state.optimizer_state,epoch,current_loss;verbose=logger.verbose)
+
+    update!(logger,epoch,current_loss)
   end
 
   finalize!(logger)
   return train_state.parameters,train_state.states
+end
+
+"""
+    struct TrainedVAE{E,D,PE,SE,PD,SD} <: NeuralNetwork
+      encoder::E
+      decoder::D
+      ps_enc::PE
+      st_enc::SE
+      ps_dec::PD
+      st_dec::SD
+      latent_dim::Int
+    end
+
+A trained [`VariationalAutoEncoder`](@ref). `evaluate!(cache,a,z)` applies the
+**decoder** (latent → high-dim); use [`encode`](@ref) for the encoder direction,
+which returns `(μ,log_var,z)` with a freshly sampled `z`.
+"""
+struct TrainedVAE{E,D,PE,SE,PD,SD} <: NeuralNetwork
+  encoder::E
+  decoder::D
+  ps_enc::PE
+  st_enc::SE
+  ps_dec::PD
+  st_dec::SD
+  latent_dim::Int
+end
+
+Arrays.return_cache(a::TrainedVAE,z::AbstractMatrix) = nothing
+
+function Arrays.evaluate!(cache,a::TrainedVAE,z::AbstractMatrix)
+  decode(a,z)
+end
+
+function encode(a::TrainedVAE,X::AbstractMatrix)
+  enc_out = first(a.encoder(Float32.(X),a.ps_enc,a.st_enc))
+  μ = enc_out[1:a.latent_dim,:]
+  log_var = enc_out[a.latent_dim+1:end,:]
+  ε = randn(eltype(μ),size(μ))
+  z = μ .+ ε .* exp.(log_var ./ 2)
+  (μ,log_var,z)
+end
+
+function decode(a::TrainedVAE,Z::AbstractMatrix)
+  first(a.decoder(Float32.(Z),a.ps_dec,a.st_dec))
+end
+
+function TrainedNeuralNetwork(strategy::NeuralOpStrategy{<:VariationalAutoEncoder},::AbstractRealisation,coeff)
+  X = Float32.(_get_data(coeff))
+  nin = size(X,1)
+  n_samples = size(X,2)
+
+  hidden = strategy.model.hidden_layers[1:end-1]
+  latent_dim = last(strategy.model.hidden_layers)
+  encoder = build_lux_chain((nin,hidden...,2*latent_dim),strategy.model.activation)
+  decoder = build_lux_chain((latent_dim,reverse(hidden)...,nin),strategy.model.activation)
+  vae = VAELayer(encoder,decoder,latent_dim)
+
+  bs = resolve_batch_size(strategy.batch_size,n_samples)
+  dataloader = MLUtils.DataLoader(X;batchsize=bs,shuffle=true,partial=false)
+
+  Random.seed!(42)
+  ps,st = Lux.setup(Random.default_rng(),vae)
+  train_state = Lux.Training.TrainState(vae,ps,st,strategy.optimiser.opt)
+
+  β = strategy.model.β
+  function vae_loss(model::VAELayer,ps,st,x)
+    n_h = size(x,1)
+    out,st = model(x,ps,st)
+    x̂ = view(out,1:n_h,:)
+    μ = view(out,n_h+1:n_h+model.latent_dim,:)
+    log_var = view(out,n_h+model.latent_dim+1:size(out,1),:)
+    recon = sum(abs2,x̂ .- x)/length(x)
+    kl = -sum(1 .+ log_var .- μ.^2 .- exp.(log_var))/(2*size(x,2))
+    return recon + β*kl,st,(;)
+  end
+
+  ps_trained,st_trained = train_vae!(
+    train_state,dataloader,strategy.optimiser.lr_scheduler,vae_loss;logger=strategy.trainlog
+  )
+
+  TrainedVAE(
+    encoder,decoder,
+    ps_trained.encoder,Lux.testmode(st_trained.encoder),
+    ps_trained.decoder,Lux.testmode(st_trained.decoder),
+    latent_dim
+  )
 end
 
 # Generic Dispatch (Steady)
@@ -231,10 +508,13 @@ function train_neural_operator(
 
   # Data extraction
   # RBSteady => get_all_data(s) is 2D: (N_dofs,N_samples)
-  target_data_full = Float32.(get_all_data(s))
-  N_dofs = size(target_data_full,1)
+  sx = CoordinateSnapshots(s,get_test(feop))
+  target = sample(strategy.sampler,sx)
+  
+  # target_data_full = Float32.(get_all_data(s))
+  # N_dofs = size(target_data_full,1)
 
-  idx_x = get_space_ids(strategy.sampler,N_dofs)
+  # idx_x = get_space_ids(strategy.sampler,N_dofs)
   target_data = @views target_data_full[idx_x,:]
 
   r = get_realisation(s)

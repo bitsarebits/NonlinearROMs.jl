@@ -32,6 +32,18 @@ function sample(s::Sampler,x::BlockSnapshots,axis=1)
   @notimplemented "Do this!"
 end
 
+# coordinate snapshots sampling
+
+for T in (:(typeof(identity)),:Function,:Integer)
+  @eval begin
+    function sample(s::Sampler{<:$T},x::CoordinateSnapshots,axis=1)
+      sx = sample(s,x.snaps,axis)
+      xx = sample(s,get_coords(x))
+      CoordinateSnapshots(sx,xx)
+    end
+  end
+end
+
 struct NeuralSampler{A,B,C}
   space_sampler::Sampler{A}
   param_sampler::Sampler{B}

@@ -76,7 +76,7 @@ end
   neural_op = reduced_operator(solver,feop,snaps)
   x_hat,stats = solve(solver,neural_op,r)
   
-  @test size(x_hat.fe_data.data) == (3,2,2)
+  @test size(get_all_data(x_hat)) == (3,2,2)
   @test stats.name == "NOMAD Transient Inference"
 end
 

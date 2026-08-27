@@ -120,7 +120,7 @@ function Algebra.solve(
   end
 
   # Wrap in GridapROMs types
-  x̂ = Snapshots(ConsecutiveParamArray(pred_3d),r)
+  x̂ = Snapshots(ConsecutiveParamArray(pred_3d),VectorDofMap(N_dofs),r)
   stats = CostTracker(t,nruns=n_samples,name="DeepONet Transient Inference")
 
   return x̂,stats
@@ -203,7 +203,7 @@ function Algebra.solve(
   end
 
   # Packaging in GridapROMs types
-  x̂ = Snapshots(ConsecutiveParamArray(pred_3d),r)
+  x̂ = Snapshots(ConsecutiveParamArray(pred_3d),VectorDofMap(N_dofs),r)
   stats = CostTracker(t,nruns=n_samples,name="NOMAD Transient Inference")
 
   return x̂,stats

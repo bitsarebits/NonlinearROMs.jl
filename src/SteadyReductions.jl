@@ -3,7 +3,7 @@ abstract type AbstractNNHyperReduction{A<:ReductionStyle} <: RBSteady.HyperReduc
 """
     struct NNOperatorReduction <: AbstractNNHyperReduction{NoReduction}
       nparams::Int
-      strategy::NNStrategy
+      strategy::NeuralOpStrategy
     end
 
 A hyper-reduction strategy for **operator regression**: the NN directly maps
@@ -15,29 +15,19 @@ The offline phase projects the residual snapshots onto the test space and
 trains the NN to reproduce the projected vectors. The online phase calls
 the NN forward pass, producing the projected residual without any assembly.
 
-`strategy` controls the MultiLayerPerceptron architecture and training.
+`strategy` controls the [`MultiLayerPerceptron`](@ref) architecture and training.
 `nparams` controls how many parameter samples to use for NN training.
 """
 struct NNOperatorReduction <: AbstractNNHyperReduction{NoReductionStyle}
   nparams::Int
-  strategy::NNStrategy
+  strategy::NeuralOpStrategy
 end
 
 function NNOperatorReduction(
   args...;
   nparams::Int=20,
-  type=MLPType(),
-  layers=(64,64),
-  lr=1e-3,
-  optimiser=Optimisers.Adam(lr),
-  loss=loss_mse,
-  epochs=1000,
-  weight_decay=0.0,
-  batch_size=0,
-  lr_schedule=nothing,
-  patience=0,
-  val_fraction=0.1,
-  strategy=NNStrategy(;type,layers,lr,optimiser,loss,epochs,weight_decay,batch_size,lr_schedule,patience,val_fraction),
+  model::NeuralNetwork=MultiLayerPerceptron(),
+  strategy::NeuralOpStrategy=NeuralOpStrategy(model),
   kwargs...
   )
 
@@ -50,7 +40,7 @@ get_strategy(r::NNOperatorReduction) = r.strategy
 """
     struct NNHyperReduction{A} <: AbstractNNHyperReduction{A}
       reduction::Reduction{A,EuclideanNorm}
-      strategy::NNStrategy
+      strategy::NeuralOpStrategy
     end
 
 A hyper-reduction strategy that uses a neural network to predict EIM
@@ -64,30 +54,20 @@ operator on the reduced integration domain.
 """
 struct NNHyperReduction{A} <: AbstractNNHyperReduction{A}
   reduction::Reduction{A,EuclideanNorm}
-  strategy::NNStrategy
+  strategy::NeuralOpStrategy
 end
 
 """
-    NNHyperReduction(args...; strategy=NNStrategy(), kwargs...) -> NNHyperReduction
+    NNHyperReduction(args...; model=MultiLayerPerceptron(), strategy=NeuralOpStrategy(model), kwargs...) -> NNHyperReduction
 
 Constructs a `NNHyperReduction` from a `Reduction` built with the same
 positional/keyword arguments accepted by `Reduction`. An optional
-`strategy` keyword overrides the default [`NNStrategy`](@ref).
+`strategy` keyword overrides the default [`NeuralOpStrategy`](@ref).
 """
 function NNHyperReduction(
   args...;
-  type=MLPType(),
-  layers=(64,64),
-  lr=1e-3,
-  optimiser=Optimisers.Adam(lr),
-  loss=loss_mse,
-  epochs=1000,
-  weight_decay=0.0,
-  batch_size=0,
-  lr_schedule=nothing,
-  patience=0,
-  val_fraction=0.1,
-  strategy=NNStrategy(;type,layers,lr,optimiser,loss,epochs,weight_decay,batch_size,lr_schedule,patience,val_fraction),
+  model::NeuralNetwork=MultiLayerPerceptron(),
+  strategy::NeuralOpStrategy=NeuralOpStrategy(model),
   kwargs...
   )
 

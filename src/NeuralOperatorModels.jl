@@ -96,3 +96,85 @@ function NOMAD(
 
   NOMAD(Tuple(approximator_layers),Tuple(decoder_layers),activation)
 end
+
+"""
+    struct MultiLayerPerceptron{F} <: NeuralNetwork
+      hidden_layers::Tuple{Vararg{Int}}
+      activation::F
+    end
+
+Recipe for a dense feed-forward network used for scalar/vector regression (e.g.
+predicting EIM/reduced-basis coefficients from parameter values). `hidden_layers`
+holds only the hidden widths (e.g. `(64,64)`); the input/output dimensions are
+inferred from the training data at [`TrainedNeuralNetwork`](@ref) call time, since
+one `MultiLayerPerceptron` recipe is typically reused (via [`NeuralOpStrategy`](@ref))
+to train many differently-shaped networks (one per triangulation/reduced quantity).
+"""
+struct MultiLayerPerceptron{F} <: NeuralNetwork
+  hidden_layers::Tuple{Vararg{Int}}
+  activation::F
+end
+
+function MultiLayerPerceptron(hidden_layers=(64,64);activation=tanh)
+  MultiLayerPerceptron(Tuple(hidden_layers),activation)
+end
+
+"""
+    struct AutoEncoder{F} <: NeuralNetwork
+      hidden_layers::Tuple{Vararg{Int}}
+      activation::F
+    end
+
+Recipe for an encoder-decoder pair for unsupervised dimensionality reduction.
+`hidden_layers = (h₁,…,h_{L-1},latent_dim)`: the encoder hidden widths are
+`(h₁,…,h_{L-1})` and the decoder mirrors them symmetrically; the input dimension
+is inferred from the training data.
+"""
+struct AutoEncoder{F} <: NeuralNetwork
+  hidden_layers::Tuple{Vararg{Int}}
+  activation::F
+end
+
+function AutoEncoder(hidden_layers;activation=tanh)
+  AutoEncoder(Tuple(hidden_layers),activation)
+end
+
+"""
+    struct VariationalAutoEncoder{F} <: NeuralNetwork
+      hidden_layers::Tuple{Vararg{Int}}
+      activation::F
+      β::Float64
+    end
+
+Recipe for a VAE with the reparameterisation trick. `hidden_layers = (h₁,…,h_{L-1},latent_dim)`,
+interpreted as for [`AutoEncoder`](@ref); `β` weighs the KL term against the
+reconstruction loss.
+"""
+struct VariationalAutoEncoder{F} <: NeuralNetwork
+  hidden_layers::Tuple{Vararg{Int}}
+  activation::F
+  β::Float64
+end
+
+function VariationalAutoEncoder(hidden_layers;activation=tanh,β::Real=1.0)
+  VariationalAutoEncoder(Tuple(hidden_layers),activation,Float64(β))
+end
+
+"""
+    struct AutoDecoder{F} <: NeuralNetwork
+      hidden_layers::Tuple{Vararg{Int}}
+      activation::F
+    end
+
+Recipe for a decoder-only model (Park et al., 2019). Per-sample latent codes are
+optimised jointly with the decoder parameters. `hidden_layers = (h₁,…,latent_dim)`;
+the decoder is built from last to first, i.e. `(latent_dim,reverse(h₁,…,h_{L-1})…,n_h)`.
+"""
+struct AutoDecoder{F} <: NeuralNetwork
+  hidden_layers::Tuple{Vararg{Int}}
+  activation::F
+end
+
+function AutoDecoder(hidden_layers;activation=tanh)
+  AutoDecoder(Tuple(hidden_layers),activation)
+end
