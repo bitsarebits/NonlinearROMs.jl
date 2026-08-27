@@ -24,8 +24,8 @@ end
   data = Float32[1 2 3; 4 5 6] # 2 features,3 samples
   stats = ZscoreStats(data)
 
-  @test size(stats.μ) == (2,1)
-  @test size(stats.σ) == (2,1)
+  @test size(stats.μ) == (2,)
+  @test size(stats.σ) == (2,)
   @test stats.μ[1] ≈ 2.0f0
 
   # Array of ones => dev = 0 converted to 1
@@ -125,7 +125,7 @@ end
   model = CartesianDiscreteModel((0.0,1.0),(2,))
   reffe = ReferenceFE(lagrangian,Float64,2)
   V = LexicographicFESpace(model,reffe)
-  @test get_coords(V) == Point{Float64}[[0.0,0.25,0.5,0.75,1.0]]
+  @test get_coords(V) == Point.([0.0,0.25,0.5,0.75,1.0])
 end
 
 # Dummy Scheduler to test interface fallback

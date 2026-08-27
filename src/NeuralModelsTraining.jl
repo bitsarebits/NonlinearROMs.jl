@@ -29,6 +29,26 @@ function Arrays.evaluate!(cache,a::TrainedModel,x::AbstractMatrix)
   first(a.chain(Float32.(x),a.parameters,a.states))
 end
 
+"""
+    (m::TrainedModel)(inputs) -> AbstractArray
+    (m::TrainedModel)(inputs,metadata) -> AbstractArray
+
+Applies `m` to `inputs` (a `(params,coords)`/`(pin,xin)` tuple for DeepONet/NOMAD, or
+a plain matrix). `metadata` optionally denormalises the output by `metadata.dmax`; it
+is a no-op when `metadata === nothing` (a `NeuralOperator` with no normalisation stats).
+"""
+function (m::TrainedModel)(inputs)
+  first(m.chain(inputs,m.parameters,m.states))
+end
+
+(m::TrainedModel)(inputs,metadata::Nothing) = m(inputs)
+
+function (m::TrainedModel)(inputs,metadata::NormStats)
+  pred = m(inputs)
+  pred .*= metadata.dmax
+  return pred
+end
+
 const TrainedAutoEncoder = TrainedModel{<:AutoEncoder}
 
 function Arrays.evaluate!(cache,a::TrainedAutoEncoder,z::AbstractMatrix)

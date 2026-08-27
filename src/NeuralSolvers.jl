@@ -1,4 +1,73 @@
 """
+    const NeuralSolver{A,C<:NeuralReduction} = GlobalRBSolver{A,C,Nothing,Nothing}
+
+    NeuralSolver(fesolver::GridapType, reduction::NeuralReduction)
+
+Initializes the Reduced Basis Solver for Neural Operators.
+
+# Arguments
+- `fesolver`: The high-fidelity standard Gridap solver (e.g., `LUSolver()`). In the context of Reduced Order Models, the neural operator acts as a surrogate for this specific full-order solver. This reference defines the underlying high-fidelity model being approximated.
+- `reduction::NeuralReduction`: The configured neural reduction strategy (e.g., `DeepONetReduction` or `NOMADReduction`).
+
+# Examples
+
+**Minimal Default Initialization:**
+```julia
+# Default hyperparameters (20000 epochs, full-batch, etc.), 2 params -> Branch, 2D coords -> Trunk
+solver = NeuralSolver(LUSolver(), DeepONetReduction(model=DeepONet(2,2)))
+```
+**Custom Initialization:**
+```julia
+using Lux
+
+strategy = NeuralStrategy(
+  DeepONet(2, 2; width=128, depth=4, activation=Lux.gelu),
+  epochs = 1000
+  )
+reduction = DeepONetReduction(strategy)
+solver = NeuralSolver(ThetaMethod(LUSolver(), dt, θ), reduction)
+```
+"""
+const NeuralSolver{A,C<:NeuralReduction} = GlobalRBSolver{A,C,Nothing,Nothing}
+
+function NeuralSolver(fesolver,reduction::NeuralReduction)
+  RBSolver(fesolver,GlobalContext(),reduction,nothing,nothing)
+end
+
+"""
+    struct NeuralOperator{O,T,A<:TrainedModel,B} <: RBOperator{O,T}
+      op::ParamOperator{O,T}
+      model::A
+      metadata::B
+    end
+
+The evaluated Reduced Basis Operator for Neural Operators.
+This struct is the direct output of the offline training phase and is passed to the `solve` function during the online phase.
+
+It stores the high-fidelity operator, the trained model (weights/states bundled inside it),
+and any normalization metadata needed to scale the data.
+
+# Fields
+- `op`: The original high-fidelity parametric operator.
+- `model`: The trained [`TrainedModel`](@ref) (Lux chain + optimised parameters/states bundled together).
+- `metadata`: Either `nothing` (no normalisation) or a [`NormStats`](@ref) bundling the
+  z-score statistics used to normalize the inputs and the absolute maximum scalar value of
+  the snapshot target data (`metadata.dmax`), used for the final denormalization of the
+  network predictions.
+"""
+struct NeuralOperator{O,T,A<:TrainedModel,B} <: RBOperator{O,T}
+  op::ParamOperator{O,T}
+  model::A
+  metadata::B
+end
+
+function NeuralOperator(op,model)
+  NeuralOperator(op,model,nothing)
+end
+
+ParamSteady.get_fe_operator(op::NeuralOperator) = op.op
+
+"""
     reduced_operator(
       solver::NeuralSolver,
       feop::ParamOperator,
@@ -19,8 +88,8 @@ function RBSteady.reduced_operator(
   )
 
   reduction = get_state_reduction(solver)
-  model,ps,st,norm_stats = train_neural_operator(reduction,feop,s)
-  NeuralOperator(feop,model,ps,st,norm_stats)
+  model,metadata... = train(reduction,feop,s)
+  NeuralOperator(feop,model,metadata...)
 end
 
 """
@@ -77,8 +146,8 @@ function RBSteady.reduced_operator(
   )
 
   reduction = get_state_reduction(solver)
-  model,ps,st,norm_stats = train_neural_operator(reduction,feop,s,pretrained_op;update_stats=update_stats)
-  NeuralOperator(feop,model,ps,st,norm_stats)
+  model,metadata... = train(reduction,feop,s,pretrained_op;update_stats=update_stats)
+  NeuralOperator(feop,model,metadata...)
 end
 
 """
@@ -102,6 +171,9 @@ function RBSteady.reduced_operator(
   reduced_operator(solver,feop,s,pretrained_op;update_stats=update_stats)
 end
 
+# No-op when a NeuralOperator carries no normalisation metadata.
+normalise!(x,::Nothing) = x
+
 function Algebra.solve(
   solver::NeuralSolver{A,<:DeepONetReduction},
   op::NeuralOperator,
@@ -113,13 +185,13 @@ function Algebra.solve(
   strategy = get_strategy(red)
   coords = get_coords(get_test(op.op))
   input = InputData(r,coords)
-  input = sample(get_sampler(strategy).param_sampler,input)
+  input = sample(get_sampler(strategy),input)
   params,coords = get_formatted_data(Float32,input)
-  normalise!((params,coords),op.norm_stats)
+  normalise!((params,coords),op.metadata)
 
-  # Inference Execution (denormalizes the output internally, using op.norm_stats.dmax)
+  # Inference Execution (denormalizes the output internally, using op.metadata.dmax)
   t = @timed begin
-    pred_cpu,_ = op.model((params,coords),op.model_weights,op.model_states,op.norm_stats)
+    pred_cpu = op.model((params,coords),op.metadata)
   end
 
   x̂ = Snapshots(ConsecutiveParamArray(pred_cpu),r)
@@ -139,14 +211,14 @@ function Algebra.solve(
   strategy = get_strategy(red)
   coords = get_coords(get_test(op.op))
   input = InputData(r,coords)
-  input = sample(get_sampler(strategy).param_sampler,input)
+  input = sample(get_sampler(strategy),input)
   params,coords = get_formatted_data(Float32,input)
   pin,xin = _flatten(params,coords)
-  normalise!((pin,xin),op.norm_stats)
+  normalise!((pin,xin),op.metadata)
 
-  # Inference (denormalizes the output internally, using op.norm_stats.dmax)
+  # Inference (denormalizes the output internally, using op.metadata.dmax)
   t = @timed begin
-    pred_cpu,_ = op.model((pin,xin),op.model_weights,op.model_states,op.norm_stats)
+    pred_cpu = op.model((pin,xin),op.metadata)
   end
 
   # Reshaping of the output for GridapROMs (N_dofs,n_samples)

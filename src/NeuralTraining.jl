@@ -73,24 +73,6 @@ function TrainedNeuralNetwork(strategy::NeuralStrategy{<:AutoEncoder},::Abstract
   )
 end
 
-"""
-    struct LatentCodeLayer{A<:AbstractMatrix} <: Lux.AbstractLuxLayer
-      init_codes::A
-    end
-
-A Lux layer with no real input: it ignores whatever it is called with and returns its
-`(latent_dim,n_train)` parameter matrix unchanged, so the per-sample latent codes of an
-[`AutoDecoder`](@ref) are optimised as ordinary Lux parameters jointly with the decoder.
-"""
-struct LatentCodeLayer{A<:AbstractMatrix} <: Lux.AbstractLuxLayer
-  init_codes::A
-end
-
-Lux.initialparameters(rng::Random.AbstractRNG,l::LatentCodeLayer) = (codes=copy(l.init_codes),)
-Lux.initialstates(rng::Random.AbstractRNG,l::LatentCodeLayer) = NamedTuple()
-
-(l::LatentCodeLayer)(x,ps,st) = ps.codes,st
-
 function TrainedNeuralNetwork(strategy::NeuralStrategy{<:AutoDecoder},::AbstractRealisation,coeff)
   X = Float32.(_get_data(coeff))
   nin = size(X,1)
@@ -115,23 +97,6 @@ function TrainedNeuralNetwork(strategy::NeuralStrategy{<:AutoDecoder},::Abstract
   train_model!(
     train_state,dataloader,strategy.optimiser.lr_scheduler,to_device_batch;logger=strategy.trainlog
   )
-end
-
-struct VAELayer{E,D} <: Lux.AbstractLuxContainerLayer{(:encoder,:decoder)}
-  encoder::E
-  decoder::D
-  latent_dim::Int
-end
-
-function (m::VAELayer)(x,ps,st)
-  enc_out,st_enc = m.encoder(x,ps.encoder,st.encoder)
-  μ = enc_out[1:m.latent_dim,:]
-  log_var = enc_out[m.latent_dim+1:end,:]
-  ε = randn(eltype(μ),size(μ))
-  z = μ .+ ε .* exp.(log_var ./ 2)
-  x̂,st_dec = m.decoder(z,ps.decoder,st.decoder)
-  out = vcat(x̂,μ,log_var)
-  return out,(encoder=st_enc,decoder=st_dec)
 end
 
 function train_vae!(train_state,dataloader,lr_scheduler,loss_fn;logger::TrainingLog)
@@ -247,7 +212,7 @@ end
 
 # Generic Dispatch (Steady)
 
-function train_neural_operator(
+function train(
   red::DeepONetReduction,
   feop::ParamOperator,
   s::AbstractSnapshots
@@ -285,10 +250,10 @@ function train_neural_operator(
   # Executing the pipeline
   trained = train_deeponet!(train_state,dataloader,coords_dev,strategy)
 
-  return model,trained.parameters,trained.states,stats
+  return trained,stats
 end
 
-function train_neural_operator(
+function train(
   red::DeepONetReduction,
   feop::ParamOperator,
   s::AbstractSnapshots,
@@ -307,7 +272,7 @@ function train_neural_operator(
   if update_stats
     stats = NormStats(data,params,coords;normalise=true)
   else
-    stats = pretrained_op.norm_stats
+    stats = pretrained_op.metadata
     expected_branch_in = length(stats.pscore.μ)
     expected_trunk_in = length(stats.xscore.μ)
     @assert size(params,1) == expected_branch_in "Branch dimension mismatch: expected $expected_branch_in, got $(size(params,1)). Check the parameter sampler."
@@ -316,11 +281,11 @@ function train_neural_operator(
   end
 
   # Pretrained model
-  model = pretrained_op.model
+  model = pretrained_op.model.chain
   opt = get_optimiser(strategy)
   coords_dev = coords |> XDEV
-  ps = pretrained_op.model_weights |> XDEV
-  st = pretrained_op.model_states |> XDEV
+  ps = pretrained_op.model.parameters |> XDEV
+  st = pretrained_op.model.states |> XDEV
   train_state = Lux.Training.TrainState(model,ps,st,opt)
 
   # Dataloader and setup
@@ -335,10 +300,10 @@ function train_neural_operator(
   # Executing the pipeline
   trained = train_deeponet!(train_state,dataloader,coords_dev,strategy)
 
-  return model,trained.parameters,trained.states,stats
+  return trained,stats
 end
 
-function train_neural_operator(
+function train(
   red::NOMADReduction,
   feop::ParamOperator,
   s::AbstractSnapshots
@@ -380,7 +345,7 @@ function train_neural_operator(
   return trained,stats
 end
 
-function train_neural_operator(
+function train(
   red::NOMADReduction,
   feop::ParamOperator,
   s::AbstractSnapshots,
@@ -401,7 +366,7 @@ function train_neural_operator(
   if update_stats
     stats = NormStats(dout,pin,xin;normalise=true)
   else
-    stats = pretrained_op.norm_stats
+    stats = pretrained_op.metadata
     expected_sensors = length(stats.pscore.μ)
     expected_coords = length(stats.xscore.μ)
     @assert size(pin,1) == expected_sensors "Sensors input dimension mismatch: expected $expected_sensors, got $(size(pin,1))."
@@ -410,10 +375,10 @@ function train_neural_operator(
   end
 
   # Pretrained model
-  model = pretrained_op.model
+  model = pretrained_op.model.chain
   opt = get_optimiser(strategy)
-  ps = pretrained_op.model_weights |> XDEV
-  st = pretrained_op.model_states |> XDEV
+  ps = pretrained_op.model.parameters |> XDEV
+  st = pretrained_op.model.states |> XDEV
   train_state = Lux.Training.TrainState(model,ps,st,opt)
 
   # DataLoader and Lux setup

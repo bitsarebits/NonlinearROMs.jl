@@ -7,7 +7,7 @@ components for [`GridapROMs.jl`](https://github.com/gridap/GridapROMs.jl).
 This package was extracted out of `GridapROMs.RBSteady`/`GridapROMs.RBTransient`
 into its own repository, and plugs back into them via multiple dispatch:
 
-- **Neural network models** (`NeuralOperatorModels.jl`) — `DeepONet`, `NOMAD`,
+- **Neural network models** (`NeuralModels.jl`) — `DeepONet`, `NOMAD`,
   `MultiLayerPerceptron`, `AutoEncoder`, `VariationalAutoEncoder`, `AutoDecoder`,
   `GenericNeuralNetwork`; all trained through the same Lux/Reactant/Enzyme
   pipeline (`NeuralStrategy`, `train_model!`, `TrainedNeuralNetwork`).
@@ -66,6 +66,10 @@ import GridapROMs.RBSteady:
 export TrainingLog
 export ZscoreStats
 export normalise!
+export CoordinateSnapshots
+export get_coords
+export InputData
+export get_formatted_data
 include("Utils.jl")
 
 export NeuralNetwork
@@ -79,10 +83,6 @@ export step_scheduler!
 export get_lr
 include("LRSchedulers.jl")
 
-export CoordinateSnapshots
-export get_coords
-include("CoordinateSnapshots.jl")
-
 export Sampler
 export MultiSampler
 export sample
@@ -91,46 +91,52 @@ export get_param_ids
 export get_time_ids
 include("Samplers.jl")
 
+export LatentCodeLayer
+export VAELayer
+include("NeuralLayers.jl")
+
 export DeepONet
 export NOMAD
 export MultiLayerPerceptron
 export AutoEncoder
 export VariationalAutoEncoder
 export AutoDecoder
-include("NeuralOperatorModels.jl")
+export build_model
+include("NeuralModels.jl")
 
 export NeuralOptimiser
 export NeuralStrategy
 export NeuralReduction
 export DeepONetReduction
 export NOMADReduction
-export NeuralSolver
-export NeuralOperator
-include("NeuralOperatorReductions.jl")
+include("NeuralReductions.jl")
 
-export train_neural_operator
-export train_model!
-export train_deeponet!
-export train_nomad!
-export TrainedNeuralNetwork
 export TrainedModel
 export TrainedAutoEncoder
 export TrainedAutoDecoder
-export TrainedVAE
+export train_model!
+export infer_latent
 export encode
 export decode
-export infer_latent
+include("NeuralModelsTraining.jl")
+
+export NeuralSolver
+export NeuralOperator
+include("NeuralSolvers.jl")
+
+export train
+export train_deeponet!
+export train_nomad!
+export TrainedNeuralNetwork
+export TrainedVAE
 export resolve_batch_size
 export XDEV
 export CDEV
-export build_model
-include("NeuralOperatorTraining.jl")
+include("NeuralTraining.jl")
 
-include("TransientNeuralOperatorTraining.jl")
+include("TransientNeuralTraining.jl")
 
-include("NeuralOperatorSolver.jl")
-
-include("TransientNeuralOperatorSolver.jl")
+include("TransientNeuralSolver.jl")
 
 export NNOperatorReduction
 export NNHyperReduction

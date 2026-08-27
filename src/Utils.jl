@@ -94,14 +94,6 @@ function NormStats(data,params,coords;normalise=false)
   NormStats(dmax,input,output)
 end
 
-# Applies `a` and denormalises its output using `stats.dmax`, so callers don't need to
-# separately track and re-apply the target's normalisation scale after inference.
-function (a::Lux.AbstractLuxLayer)(inputs,ps,st,stats::NormStats)
-  pred,st = a(inputs,ps,st)
-  pred .*= stats.dmax
-  return pred,st
-end
-
 normalise!(args...) = @abstractmethod
 
 function normalise!(data::AbstractVector,stats::ZscoreStats)

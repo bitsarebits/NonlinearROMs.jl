@@ -93,6 +93,11 @@ function sample(s::MultiSampler,x::AbstractArray{<:Point})
   sample(s.space_sampler,vec(x))
 end
 
+function sample(s::MultiSampler,x::InputData)
+  rx = sample(s.param_sampler,get_realisation(x))
+  InputData(rx,get_coords(x))
+end
+
 function param_sample(s::Sampler{typeof(identity)},x::Snapshots)
   x
 end

@@ -1,4 +1,4 @@
-function train_neural_operator(
+function train(
   red::DeepONetReduction,
   feop::ODEParamOperator,
   s::AbstractSnapshots
@@ -36,10 +36,10 @@ function train_neural_operator(
   # Executing the pipeline
   trained = train_deeponet!(train_state,dataloader,coords_dev,strategy)
 
-  return model,trained.parameters,trained.states,stats
+  return trained,stats
 end
 
-function train_neural_operator(
+function train(
   red::DeepONetReduction,
   feop::ODEParamOperator,
   s::AbstractSnapshots,
@@ -58,16 +58,16 @@ function train_neural_operator(
   if update_stats
     stats = NormStats(data,params,coords;normalise=true)
   else
-    stats = pretrained_op.norm_stats
+    stats = pretrained_op.metadata
     normalise!((data,params,coords),stats)
   end
 
   # Pretrained model
-  model = pretrained_op.model
+  model = pretrained_op.model.chain
   opt = get_optimiser(strategy)
   coords_dev = coords |> XDEV
-  ps = pretrained_op.model_weights |> XDEV
-  st = pretrained_op.model_states |> XDEV
+  ps = pretrained_op.model.parameters |> XDEV
+  st = pretrained_op.model.states |> XDEV
   train_state = Lux.Training.TrainState(model,ps,st,opt)
 
   # Dataloader and setup
@@ -82,10 +82,10 @@ function train_neural_operator(
   # Executing the pipeline
   trained = train_deeponet!(train_state,dataloader,coords_dev,strategy)
 
-  return model,trained.parameters,trained.states,stats
+  return trained,stats
 end
 
-function train_neural_operator(
+function train(
   red::NOMADReduction,
   feop::ODEParamOperator,
   s::AbstractSnapshots
@@ -124,10 +124,10 @@ function train_neural_operator(
   # Running the pipeline
   trained = train_nomad!(train_state,dataloader,strategy)
 
-  return model,trained.parameters,trained.states,stats
+  return trained,stats
 end
 
-function train_neural_operator(
+function train(
   red::NOMADReduction,
   feop::ODEParamOperator,
   s::AbstractSnapshots,
@@ -148,15 +148,15 @@ function train_neural_operator(
   if update_stats
     stats = NormStats(dout,pin,xin;normalise=true)
   else
-    stats = pretrained_op.norm_stats
+    stats = pretrained_op.metadata
     normalise!((dout,pin,xin),stats)
   end
 
   # Pretrained model
-  model = pretrained_op.model
+  model = pretrained_op.model.chain
   opt = get_optimiser(strategy)
-  ps = pretrained_op.model_weights |> XDEV
-  st = pretrained_op.model_states |> XDEV
+  ps = pretrained_op.model.parameters |> XDEV
+  st = pretrained_op.model.states |> XDEV
   train_state = Lux.Training.TrainState(model,ps,st,opt)
 
   # DataLoader and Lux setup
@@ -171,5 +171,5 @@ function train_neural_operator(
   # Running the pipeline
   trained = train_nomad!(train_state,dataloader,strategy)
 
-  return model,trained.parameters,trained.states,stats
+  return trained,stats
 end

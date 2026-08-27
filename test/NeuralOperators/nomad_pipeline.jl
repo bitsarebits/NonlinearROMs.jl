@@ -49,7 +49,7 @@ Gridap.FESpaces.get_test(::MockTransientOpNOMAD) = LexicographicFESpace(MockMode
   neural_op = reduced_operator(solver,feop,snaps)
   
   @test neural_op isa NeuralOperator
-  @test neural_op.norm_stats.dmax > 0
+  @test neural_op.metadata.dmax > 0
   
   # Online Phase
   r_test = Realisation([[0.5f0,0.5f0]])
@@ -101,7 +101,7 @@ end
   new_op = reduced_operator(solver,feop,snaps,pretrained_op; update_stats=true)
   
   @test new_op isa NeuralOperator
-  @test new_op.model === pretrained_op.model
+  @test new_op.model.chain === pretrained_op.model.chain
 end
 
 @testset "Error Handling and Edge Cases (NOMAD)" begin
