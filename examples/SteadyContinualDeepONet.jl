@@ -56,7 +56,7 @@ end
 # Explicit DeepONet initialization with matched sensor dimensionality (50 inputs)
 model_arch = DeepONet(branch_layers=(50,128,128,64),trunk_layers=(2,128,128,64),activation=Lux.gelu)
 
-strategy_base = NeuralOpStrategy(
+strategy_base = NeuralStrategy(
     model_arch,
     epochs = 4000,
     batch_size = 25, # Mini-batching over n_samples (150/25 = 6 batches per epoch)
@@ -89,7 +89,7 @@ feop_ext = LinearParamOperator(res,a,pspace_ext,trial,test,FEDomains((Ω,),(Ω,)
 n_ext = 60
 s_ext,_ = solution_snapshots(fesolver,feop_ext,realisation(pspace_ext;nparams=n_ext,sampling=:halton))
 
-strategy_ft = NeuralOpStrategy(
+strategy_ft = NeuralStrategy(
     model_arch,
     epochs = 2000,
     batch_size = 15, # Mini-batching over 60 samples

@@ -3,7 +3,7 @@ abstract type AbstractNNHyperReduction{A<:ReductionStyle} <: RBSteady.HyperReduc
 """
     struct NNOperatorReduction <: AbstractNNHyperReduction{NoReduction}
       nparams::Int
-      strategy::NeuralOpStrategy
+      strategy::NeuralStrategy
     end
 
 A hyper-reduction strategy for **operator regression**: the NN directly maps
@@ -20,14 +20,14 @@ the NN forward pass, producing the projected residual without any assembly.
 """
 struct NNOperatorReduction <: AbstractNNHyperReduction{NoReductionStyle}
   nparams::Int
-  strategy::NeuralOpStrategy
+  strategy::NeuralStrategy
 end
 
 function NNOperatorReduction(
   args...;
   nparams::Int=20,
   model::NeuralNetwork=MultiLayerPerceptron(),
-  strategy::NeuralOpStrategy=NeuralOpStrategy(model),
+  strategy::NeuralStrategy=NeuralStrategy(model),
   kwargs...
   )
 
@@ -40,7 +40,7 @@ get_strategy(r::NNOperatorReduction) = r.strategy
 """
     struct NNHyperReduction{A} <: AbstractNNHyperReduction{A}
       reduction::Reduction{A,EuclideanNorm}
-      strategy::NeuralOpStrategy
+      strategy::NeuralStrategy
     end
 
 A hyper-reduction strategy that uses a neural network to predict EIM
@@ -54,20 +54,20 @@ operator on the reduced integration domain.
 """
 struct NNHyperReduction{A} <: AbstractNNHyperReduction{A}
   reduction::Reduction{A,EuclideanNorm}
-  strategy::NeuralOpStrategy
+  strategy::NeuralStrategy
 end
 
 """
-    NNHyperReduction(args...; model=MultiLayerPerceptron(), strategy=NeuralOpStrategy(model), kwargs...) -> NNHyperReduction
+    NNHyperReduction(args...; model=MultiLayerPerceptron(), strategy=NeuralStrategy(model), kwargs...) -> NNHyperReduction
 
 Constructs a `NNHyperReduction` from a `Reduction` built with the same
 positional/keyword arguments accepted by `Reduction`. An optional
-`strategy` keyword overrides the default [`NeuralOpStrategy`](@ref).
+`strategy` keyword overrides the default [`NeuralStrategy`](@ref).
 """
 function NNHyperReduction(
   args...;
   model::NeuralNetwork=MultiLayerPerceptron(),
-  strategy::NeuralOpStrategy=NeuralOpStrategy(model),
+  strategy::NeuralStrategy=NeuralStrategy(model),
   kwargs...
   )
 

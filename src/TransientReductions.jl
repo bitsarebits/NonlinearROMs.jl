@@ -10,7 +10,7 @@ Carry the `combination::TimeCombination` from the ODE solver.
 struct HighDimNNOperatorReduction <: AbstractHighDimNNHyperReduction{NoReductionStyle}
   combination::TimeCombination
   nparams::Int
-  strategy::NeuralOpStrategy
+  strategy::NeuralStrategy
 end
 
 function HighDimNNOperatorReduction(
@@ -18,7 +18,7 @@ function HighDimNNOperatorReduction(
   args...;
   nparams::Int=20,
   model::NeuralNetwork=MultiLayerPerceptron(),
-  strategy::NeuralOpStrategy=NeuralOpStrategy(model),
+  strategy::NeuralStrategy=NeuralStrategy(model),
   kwargs...
   )
 
@@ -39,14 +39,14 @@ basis-projection stage.
 struct HighDimNNHyperReduction{A} <: AbstractHighDimNNHyperReduction{A}
   combination::TimeCombination
   reduction::Reduction{A,EuclideanNorm}
-  strategy::NeuralOpStrategy
+  strategy::NeuralStrategy
 end
 
 function HighDimNNHyperReduction(
   combination::TimeCombination,
   args...;
   model::NeuralNetwork=MultiLayerPerceptron(),
-  strategy::NeuralOpStrategy=NeuralOpStrategy(model),
+  strategy::NeuralStrategy=NeuralStrategy(model),
   kwargs...
   )
 

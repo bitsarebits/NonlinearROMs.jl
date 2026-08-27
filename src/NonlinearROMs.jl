@@ -10,7 +10,7 @@ into its own repository, and plugs back into them via multiple dispatch:
 - **Neural network models** (`NeuralOperatorModels.jl`) — `DeepONet`, `NOMAD`,
   `MultiLayerPerceptron`, `AutoEncoder`, `VariationalAutoEncoder`, `AutoDecoder`,
   `GenericNeuralNetwork`; all trained through the same Lux/Reactant/Enzyme
-  pipeline (`NeuralOpStrategy`, `train_model!`, `TrainedNeuralNetwork`).
+  pipeline (`NeuralStrategy`, `train_model!`, `TrainedNeuralNetwork`).
 
 - **Steady hyper-reduction** — `NNOperatorReduction` (operator regression),
   `NNHyperReduction` (NN-predicted EIM coefficients), `NNOperator`,
@@ -63,6 +63,11 @@ import GridapROMs.RBSteady:
   GlobalRBSolver,GlobalContext,get_reduction,get_state_reduction,get_interpolation,
   allocate_coefficient,allocate_hyper_reduction,allocate_hypred_cache
 
+export TrainingLog
+export ZscoreStats
+export normalise!
+include("Utils.jl")
+
 export NeuralNetwork
 export GenericNeuralNetwork
 include("NeuralNetworks.jl")
@@ -74,20 +79,17 @@ export step_scheduler!
 export get_lr
 include("LRSchedulers.jl")
 
-export TrainingLog
-include("TrainingLogs.jl")
-
 export CoordinateSnapshots
 export get_coords
 include("CoordinateSnapshots.jl")
 
 export Sampler
-export NeuralSampler
+export MultiSampler
 export sample
 export get_ids
 export get_param_ids
 export get_time_ids
-include("NeuralSamplers.jl")
+include("Samplers.jl")
 
 export DeepONet
 export NOMAD
@@ -98,8 +100,8 @@ export AutoDecoder
 include("NeuralOperatorModels.jl")
 
 export NeuralOptimiser
-export NeuralOpStrategy
-export NeuralOpReduction
+export NeuralStrategy
+export NeuralReduction
 export DeepONetReduction
 export NOMADReduction
 export NeuralSolver
@@ -122,12 +124,12 @@ export resolve_batch_size
 export XDEV
 export CDEV
 export build_model
-export ZscoreStats
-export normalise!
 include("NeuralOperatorTraining.jl")
+
 include("TransientNeuralOperatorTraining.jl")
 
 include("NeuralOperatorSolver.jl")
+
 include("TransientNeuralOperatorSolver.jl")
 
 export NNOperatorReduction

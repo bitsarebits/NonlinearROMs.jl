@@ -48,7 +48,7 @@ s_base,_ = solution_snapshots(fesolver,feop_base,σ_base,uh₀ₚ_base)
 model_arch = DeepONet(1,2;width=128,depth=4,activation=Lux.gelu) # High capacity; 1 param -> Branch, 1D coords + time -> Trunk
 
 # Neural Setup (Log transform + Space-Time subsampling)
-strategy_base = NeuralOpStrategy(
+strategy_base = NeuralStrategy(
     model_arch,
     epochs = 3000,
     batch_size = 10, # Mini-batching over 50 samples
@@ -85,7 +85,7 @@ n_ext = 30
 uh₀ₚ_ext(σ) = interpolate_everywhere(u₀ₚ(σ),trial(σ,t0))
 s_ext,_ = solution_snapshots(fesolver,feop_ext,σ_ext,uh₀ₚ_ext)
 
-strategy_transfer = NeuralOpStrategy(
+strategy_transfer = NeuralStrategy(
     model_arch,
     epochs = 1500,
     batch_size = 10,
