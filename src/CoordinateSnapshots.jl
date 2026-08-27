@@ -43,6 +43,16 @@ function _is_periodic_node(inode,nodes)
   end
 end
 
+"""
+    coords_matrix(V::SingleFieldFESpace) -> Matrix{Float32}
+
+Full-resolution counterpart of `get_formatted_data`'s coordinate stacking: stacks
+every DoF coordinate of `V` (no spatial subsampling) into a `(D_phys,N_dofs)` matrix.
+Used at inference time, where predictions are required at every DoF regardless of the
+spatial subsampling used during training.
+"""
+coords_matrix(V::SingleFieldFESpace) = Float32.(stack(p -> collect(p.data),vec(get_coords(V))))
+
 struct CoordinateSnapshots{T,N,Tc,Nc,A<:AbstractSnapshots{T,N},B<:AbstractArray{Tc,Nc}} <:AbstractSnapshots{T,N}
   snaps::A
   coords::B

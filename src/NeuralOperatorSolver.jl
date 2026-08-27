@@ -110,8 +110,8 @@ function Algebra.solve(
 
   strategy = get_state_reduction(solver) |> get_strategy
 
-  branch_stats = op.norm_stats.branch
-  trunk_stats = op.norm_stats.trunk
+  branch_stats = op.norm_stats.input
+  trunk_stats = op.norm_stats.output
 
   # Branch Input (Parameters extraction)
   raw_params = Float32.(matrix_of_params(r))
@@ -152,8 +152,8 @@ function Algebra.solve(
   max_u = op.max_u
   strategy = get_state_reduction(solver) |> get_strategy
 
-  u_in_stats = op.norm_stats.u_in
-  y_in_stats = op.norm_stats.y_in
+  u_in_stats = op.norm_stats.input
+  y_in_stats = op.norm_stats.output
 
   # Parameters and Sensors extraction
   raw_params = Float32.(matrix_of_params(r))

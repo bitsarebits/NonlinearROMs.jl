@@ -42,7 +42,7 @@ function DeepONet(
   ntrunk_in::Int;
   width::Int=64,
   depth::Int=3,
-  hidden = ntuple(_ -> width,depth),
+  hidden=ntuple(_ -> width,depth),
   branch_layers=(nbranch_in,hidden...,width),
   trunk_layers=(ntrunk_in,hidden...,width),
   activation=tanh
@@ -88,7 +88,7 @@ function NOMAD(
   ncoords_in::Int;
   width::Int=64,
   depth::Int=3,
-  hidden = ntuple(_ -> width,depth),
+  hidden=ntuple(_ -> width,depth),
   approximator_layers=(nsensors_in,hidden...,width),
   decoder_layers=(width+ncoords_in,hidden...,1),
   activation=tanh
@@ -115,8 +115,14 @@ struct MultiLayerPerceptron{F} <: NeuralNetwork
   activation::F
 end
 
-function MultiLayerPerceptron(hidden_layers=(64,64);activation=tanh)
-  MultiLayerPerceptron(Tuple(hidden_layers),activation)
+function MultiLayerPerceptron(;
+  width::Int=64,
+  depth::Int=3,
+  hidden=ntuple(_ -> width,depth),
+  activation=tanh
+  )
+
+  MultiLayerPerceptron(Tuple(hidden),activation)
 end
 
 """
@@ -135,8 +141,14 @@ struct AutoEncoder{F} <: NeuralNetwork
   activation::F
 end
 
-function AutoEncoder(hidden_layers;activation=tanh)
-  AutoEncoder(Tuple(hidden_layers),activation)
+function AutoEncoder(
+  width::Int=64,
+  depth::Int=3,
+  hidden=ntuple(_ -> width,depth),
+  activation=tanh
+  )
+
+  AutoEncoder(Tuple(hidden),activation)
 end
 
 """
@@ -156,8 +168,15 @@ struct VariationalAutoEncoder{F} <: NeuralNetwork
   β::Float64
 end
 
-function VariationalAutoEncoder(hidden_layers;activation=tanh,β::Real=1.0)
-  VariationalAutoEncoder(Tuple(hidden_layers),activation,Float64(β))
+function VariationalAutoEncoder(
+  width::Int=64,
+  depth::Int=3,
+  hidden=ntuple(_ -> width,depth),
+  activation=tanh,
+  β=1.0
+  )
+
+  VariationalAutoEncoder(Tuple(hidden),activation,Float64(β))
 end
 
 """
@@ -175,6 +194,72 @@ struct AutoDecoder{F} <: NeuralNetwork
   activation::F
 end
 
-function AutoDecoder(hidden_layers;activation=tanh)
-  AutoDecoder(Tuple(hidden_layers),activation)
+function AutoDecoder(width::Int=64,
+  depth::Int=3,
+  hidden=ntuple(_ -> width,depth),
+  activation=tanh
+  )
+
+  AutoDecoder(Tuple(hidden),activation)
 end
+
+# Build model
+
+function build_lux_chain(layers::Tuple,activation)
+  lux_layers = []
+  for i in 1:(length(layers)-1)
+    if i < length(layers)-1
+      push!(lux_layers,Lux.Dense(layers[i] => layers[i+1],activation))
+    else
+      # last layer (no activation)
+      push!(lux_layers,Lux.Dense(layers[i] => layers[i+1]))
+    end
+  end
+  Lux.Chain(lux_layers...)
+end
+
+# Create a DeepONet layers
+function LuxDeepONet(branch_net,trunk_net)
+  Lux.Chain(
+    # Process inputs (u,y) independently,then matrix-multiply them
+    Lux.Parallel(
+      *;
+      # Branch: process 'u' -> shape (Features,Batch)
+      # then transpose (adjoint) -> shape (Batch,Features)
+      branch = Lux.Chain(branch_net,Lux.WrappedFunction(adjoint)),
+
+      # Trunk: process 'y' -> shape (Features,Points)
+      trunk = trunk_net
+    ),
+    # The '*' gives (Batch,Points).
+    # Final transpose (adjoint) -> target shape: (Points,Batch)
+    Lux.WrappedFunction(adjoint)
+  )
+end
+
+function build_model(model::DeepONet)
+  branch_net = build_lux_chain(model.branch_layers,model.activation)
+  trunk_net = build_lux_chain(model.trunk_layers,model.activation)
+  LuxDeepONet(branch_net,trunk_net)
+end
+
+function LuxNOMAD(approximator_net,decoder_net)
+  Lux.Chain(
+    # Apply approximator to 'u',pass 'y' untouched,and concatenate them (vcat)
+    Lux.Parallel(
+      vcat;
+      approximator = approximator_net,
+      y_pass_through = Lux.NoOpLayer()
+    ),
+    # Pass the concatenated vector [approximator(u); y] to the decoder
+    decoder_net
+  )
+end
+
+function build_model(model::NOMAD)
+  approximator_net = build_lux_chain(model.approximator_layers,model.activation)
+  decoder_net = build_lux_chain(model.decoder_layers,model.activation)
+  LuxNOMAD(approximator_net,decoder_net)
+end
+
+build_model(::NeuralNetwork) = @abstractmethod
