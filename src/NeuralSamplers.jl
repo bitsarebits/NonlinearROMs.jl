@@ -59,6 +59,12 @@ for T in (:(typeof(identity)),:Function,:Integer)
       xx = sample(s,get_coords(x))
       CoordinateSnapshots(sx,xx)
     end
+
+    function sample(s::Sampler{<:$T},x::InputData,args...)
+      rx = sample(s,get_realisation(x))
+      xx = sample(s,get_coords(x))
+      InputData(rx,xx)
+    end
   end
 end
 

@@ -217,13 +217,12 @@ function NeuralOpSolver(fesolver,reduction::NeuralOpReduction)
 end
 
 """
-    struct NeuralRBOperator{O,T,Mod,M,S,NStats,U} <: RBOperator{O,T}
+    struct NeuralRBOperator{O,T,Mod,M,S,NStats} <: RBOperator{O,T}
       op::ParamOperator{O,T}
       model::Mod
       model_weights::M
       model_states::S
       norm_stats::NStats
-      max_u::U
     end
 
 The evaluated Reduced Basis Operator for Neural Operators.
@@ -236,16 +235,16 @@ It stores the high-fidelity operator, the trained model, the optimized network w
 - `model`: The trained Neural Operator architecture.
 - `model_weights`: The optimized weights of the network.
 - `model_states`: The states of the network (e.g., Batch Normalization running averages, if any).
-- `norm_stats`: A NamedTuple containing the z-score statistics (\$\\mu\$ and \$\\sigma\$) computed during training to normalize the inputs.
-- `max_u`: The absolute maximum scalar value of the snapshot target data, used for the final denormalization of the network predictions.
+- `norm_stats`: A [`NeuralStats`](@ref) bundling the z-score statistics used to normalize the
+  inputs and the absolute maximum scalar value of the snapshot target data (`norm_stats.dmax`),
+  used for the final denormalization of the network predictions.
 """
-struct NeuralRBOperator{O,T,Mod,M,S,NStats,U} <: RBOperator{O,T}
+struct NeuralRBOperator{O,T,Mod,M,S,NStats} <: RBOperator{O,T}
   op::ParamOperator{O,T}
   model::Mod
   model_weights::M
   model_states::S
   norm_stats::NStats
-  max_u::U
 end
 
 ParamSteady.get_fe_operator(op::NeuralRBOperator) = op.op

@@ -19,8 +19,8 @@ function RBSteady.reduced_operator(
   )
 
   reduction = get_state_reduction(solver)
-  model,ps,st,norm_stats,max_u = train_neural_operator(reduction,feop,s)
-  NeuralRBOperator(feop,model,ps,st,norm_stats,max_u)
+  model,ps,st,norm_stats = train_neural_operator(reduction,feop,s)
+  NeuralRBOperator(feop,model,ps,st,norm_stats)
 end
 
 """
@@ -68,7 +68,7 @@ solver_ft = NeuralOpSolver(LUSolver(), DeepONetReduction(ft_strategy))
 new_op = reduced_operator(solver_ft, feop, snapshots_new, pretrained_op; update_stats=false)
 ```
 """
-function RBSteady.reduced_operator(
+function retrain_operator(
   solver::NeuralOpSolver,
   feop::ParamOperator,
   s::AbstractSnapshots,
@@ -77,8 +77,8 @@ function RBSteady.reduced_operator(
   )
 
   reduction = get_state_reduction(solver)
-  model,ps,st,norm_stats,max_u = train_neural_operator(reduction,feop,s,pretrained_op;update_stats=update_stats)
-  NeuralRBOperator(feop,model,ps,st,norm_stats,max_u)
+  model,ps,st,norm_stats = train_neural_operator(reduction,feop,s,pretrained_op;update_stats=update_stats)
+  NeuralRBOperator(feop,model,ps,st,norm_stats)
 end
 
 """
@@ -91,7 +91,7 @@ end
 
 Automatically extracts the high-fidelity operator (`feop`) from `pretrained_op.op` and invokes the main fine-tuning routine.
 """
-function RBSteady.reduced_operator(
+function retrain_operator(
   solver::NeuralOpSolver,
   s::AbstractSnapshots,
   pretrained_op::NeuralRBOperator;
@@ -99,7 +99,7 @@ function RBSteady.reduced_operator(
   )
 
   feop = pretrained_op.op
-  reduced_operator(solver,feop,s,pretrained_op;update_stats=update_stats)
+  retrain_operator(solver,feop,s,pretrained_op;update_stats=update_stats)
 end
 
 function Algebra.solve(
@@ -108,36 +108,22 @@ function Algebra.solve(
   r::Realisation
   ) where A
 
-  strategy = get_state_reduction(solver) |> get_strategy
+  # Prepare input
+  red = get_state_reduction(solver)
+  strategy = get_strategy(red)
+  coords = get_coords(get_test(op.op))
+  input = InputData(r,coords)
+  input = sample(get_sampler(strategy).param_sampler,input)
+  params,coords = get_formatted_data(Float32,input)
+  normalise!((params,coords),op.norm_stats)
 
-  branch_stats = op.norm_stats.input
-  trunk_stats = op.norm_stats.output
-
-  # Branch Input (Parameters extraction)
-  raw_params = Float32.(matrix_of_params(r))
-  n_samples = size(raw_params,2)
-
-  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
-  normalise!(params_matrix,branch_stats)
-  f_in = params_matrix
-
-  # Trunk Input (Coordinates extraction, full resolution)
-  V = get_test(op.op)
-
-  x_test = coords_matrix(V)
-  normalise!(x_test,trunk_stats)
-  x_in = x_test
-
-  # Inference Execution
+  # Inference Execution (denormalizes the output internally, using op.norm_stats.dmax)
   t = @timed begin
-    pred_cpu,_ = op.model((f_in,x_in),op.model_weights,op.model_states)
+    pred_cpu,_ = op.model((params,coords),op.model_weights,op.model_states,op.norm_stats)
   end
 
-  # Denormalize output
-  pred_cpu .*= op.max_u
-
   x̂ = Snapshots(ConsecutiveParamArray(pred_cpu),r)
-  stats = CostTracker(t,nruns=n_samples,name="DeepONet Inference")
+  stats = CostTracker(t,nruns=num_params(r),name="DeepONet Inference")
 
   return x̂,stats
 end
@@ -148,65 +134,26 @@ function Algebra.solve(
   r::Realisation
   ) where A
 
-  nomad_net = op.model
-  max_u = op.max_u
-  strategy = get_state_reduction(solver) |> get_strategy
+  # Prepare input
+  red = get_state_reduction(solver)
+  strategy = get_strategy(red)
+  coords = get_coords(get_test(op.op))
+  input = InputData(r,coords)
+  input = sample(get_sampler(strategy).param_sampler,input)
+  params,coords = get_formatted_data(Float32,input)
+  pin,xin = _flatten(params,coords)
+  normalise!((pin,xin),op.norm_stats)
 
-  u_in_stats = op.norm_stats.input
-  y_in_stats = op.norm_stats.output
-
-  # Parameters and Sensors extraction
-  raw_params = Float32.(matrix_of_params(r))
-  n_samples = size(raw_params,2)
-
-  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
-  n_sensors = size(params_matrix,1)
-
-  # Coordinates extraction (full resolution)
-  V = get_test(op.op)
-  x_test = coords_matrix(V)
-  D_phys = size(x_test,1)
-  N_dofs = size(x_test,2)
-
-  # Flattening of input tensors
-  N_tot = N_dofs * n_samples
-  u_in = zeros(Float32,n_sensors,N_tot)
-  y_in = zeros(Float32,D_phys,N_tot)
-
-  col = 1
-  @views for sample_idx in 1:n_samples
-    sensor_vals = params_matrix[:,sample_idx]
-    for x_idx in 1:N_dofs
-      u_in[:,col] .= sensor_vals
-      y_in[:,col] .= x_test[:,x_idx]
-      col += 1
-    end
-  end
-
-  # Normalization
-  normalise!(u_in,u_in_stats)
-  normalise!(y_in,y_in_stats)
-
-  # Inference
+  # Inference (denormalizes the output internally, using op.norm_stats.dmax)
   t = @timed begin
-    pred_cpu,_ = nomad_net((u_in,y_in),op.model_weights,op.model_states)
+    pred_cpu,_ = op.model((pin,xin),op.model_weights,op.model_states,op.norm_stats)
   end
-
-  # Denormalization
-  pred_cpu .*= max_u
 
   # Reshaping of the output for GridapROMs (N_dofs,n_samples)
-  pred_2d = zeros(Float64,N_dofs,n_samples)
-  col = 1
-  for sample_idx in 1:n_samples
-    for x_idx in 1:N_dofs
-      pred_2d[x_idx,sample_idx] = pred_cpu[1,col]
-      col += 1
-    end
-  end
+  pred_2d = reshape(pred_cpu,size(coords,2),size(params,2))
 
   x̂ = Snapshots(ConsecutiveParamArray(pred_2d),r)
-  stats = CostTracker(t,nruns=n_samples,name="NOMAD Inference")
+  stats = CostTracker(t,nruns=num_params(r),name="NOMAD Inference")
 
   return x̂,stats
 end

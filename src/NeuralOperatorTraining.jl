@@ -23,15 +23,30 @@ function ZscoreStats(data::AbstractMatrix;normalise=false)
   return ZscoreStats(μ,σ)
 end
 
-struct NeuralStats{A<:ZscoreStats,B<:ZscoreStats}
-  input::A 
-  output::B
+struct NeuralStats{T<:Real,A<:ZscoreStats,B<:ZscoreStats}
+  dmax::T
+  pscore::A 
+  xscore::B
 end
 
-function NeuralStats(in,out;kwargs...)
-  input = ZscoreStats(in;kwargs...)
-  output = ZscoreStats(out;kwargs...)
-  NeuralStats(input,output)
+function NeuralStats(data,params,coords;normalise=false)
+  dmax = maximum(abs,data)
+  normalise && (data ./= dmax)
+  input = ZscoreStats(params;normalise)
+  output = ZscoreStats(coords;normalise)
+  NeuralStats(dmax,input,output)
+end
+
+"""
+    (model::Lux.AbstractLuxLayer)(inputs,ps,st,stats::NeuralStats)
+
+Applies `model` and denormalises its output using `stats.dmax`, so callers don't need to
+separately track and re-apply the target's normalisation scale after inference.
+"""
+function (model::Lux.AbstractLuxLayer)(inputs,ps,st,stats::NeuralStats)
+  pred,st = model(inputs,ps,st)
+  pred .*= stats.dmax
+  return pred,st
 end
 
 # Training loop
@@ -454,8 +469,7 @@ function train_neural_operator(
   data,params,coords = get_formatted_data(Float32,target)
 
   # Normalisation
-  maxd = maximum(abs,data); data ./= maxd
-  stats = NeuralStats(params,coords;normalise=true)
+  stats = NeuralStats(data,params,coords;normalise=true)
 
   # Building the DeepONet
   rng = Random.default_rng()
@@ -480,7 +494,7 @@ function train_neural_operator(
   ps_trained,st_trained = train_deeponet!(train_state,dataloader,coords_dev,strategy)
   st_test = Lux.testmode(st_trained) |> CDEV
 
-  return model,ps_trained |> CDEV,st_test,stats,maxd
+  return model,ps_trained |> CDEV,st_test,stats
 end
 
 function train_neural_operator(
@@ -499,9 +513,12 @@ function train_neural_operator(
   data,params,coords = get_formatted_data(Float32,target)
 
   # Normalisation
-  maxd = maximum(abs,data); data ./= maxd
-  stats = update_stats ? NeuralStats(params,coords) : pretrained_op.norm_stats
-  normalise!((params,coords),stats)
+  if update_stats
+    stats = NeuralStats(data,params,coords;normalise=true)
+  else
+    stats = pretrained_op.norm_stats
+    normalise!((data,params,coords),stats)
+  end
 
   # Pretrained model
   model = pretrained_op.model
@@ -524,7 +541,7 @@ function train_neural_operator(
   ps_trained,st_trained = train_deeponet!(train_state,dataloader,coords_dev,strategy)
   st_test = Lux.testmode(st_trained) |> CDEV
 
-  return model,ps_trained |> CDEV,st_test,stats,maxd
+  return model,ps_trained |> CDEV,st_test,stats
 end
 
 function train_neural_operator(
@@ -543,8 +560,7 @@ function train_neural_operator(
   N_tot = size(dout,2)
 
   # Normalisation
-  maxd = maximum(abs,dout); dout ./= maxd
-  stats = NeuralStats(pin,xin;normalise=true)
+  stats = NeuralStats(dout,pin,xin;normalise=true)
 
   # Building the NOMAD model
   rng = Random.default_rng()
@@ -568,7 +584,7 @@ function train_neural_operator(
   ps_trained,st_trained = train_nomad!(train_state,dataloader,strategy)
   st_test = Lux.testmode(st_trained) |> CDEV
 
-  return model,ps_trained |> CDEV,st_test,stats,maxd
+  return model,ps_trained |> CDEV,st_test,stats
 end
 
 function train_neural_operator(
@@ -589,9 +605,12 @@ function train_neural_operator(
   N_tot = size(dout,2)
 
   # Normalisation
-  maxd = maximum(abs,dout); dout ./= maxd
-  stats = update_stats ? NeuralStats(pin,xin) : pretrained_op.norm_stats
-  normalise!((pin,xin),stats)
+  if update_stats
+    stats = NeuralStats(dout,pin,xin;normalise=true)
+  else
+    stats = pretrained_op.norm_stats
+    normalise!((dout,pin,xin),stats)
+  end
 
   # Pretrained model
   model = pretrained_op.model
@@ -613,7 +632,7 @@ function train_neural_operator(
   ps_trained,st_trained = train_nomad!(train_state,dataloader,strategy)
   st_test = Lux.testmode(st_trained) |> CDEV
 
-  return model,ps_trained |> CDEV,st_test,stats,maxd
+  return model,ps_trained |> CDEV,st_test,stats
 end
 
 # utils
@@ -643,8 +662,15 @@ end
 
 function normalise!(inout::NTuple{2,AbstractArray},stats::NeuralStats)
   a,b = inout
-  normalise!(a,stats.input)
-  normalise!(b,stats.output)
+  normalise!(a,stats.pscore)
+  normalise!(b,stats.xscore)
+end
+
+function normalise!(inout::NTuple{3,AbstractArray},stats::NeuralStats)
+  a,b,c = inout
+  a ./= stats.dmax
+  normalise!(b,stats.xscore)
+  normalise!(c,stats.dscore)
 end
 
 function _flatten(
@@ -670,4 +696,26 @@ function _flatten(
   end
 
   return dout,pin,xin
+end
+
+function _flatten(
+  params::AbstractArray{T},
+  coords::AbstractArray{T}
+  ) where T
+
+  ntot = size(coords,2)*size(params,2)
+  pin = zeros(T,size(params,1),ntot)
+  xin = zeros(T,size(coords,1),ntot)
+
+  col_idx = 1
+  @views for i in axes(params,2)
+    p = params[:,i]
+    for j in axes(coords,2)
+      pin[:,col_idx] = p
+      xin[:,col_idx] = coords[:,j]
+      col_idx += 1
+    end
+  end
+
+  return pin,xin
 end

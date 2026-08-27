@@ -49,7 +49,7 @@ Gridap.FESpaces.get_test(::MockTransientOpDON) = LexicographicFESpace(MockModel,
   neural_op = reduced_operator(solver,feop,snaps)
   
   @test neural_op isa NeuralRBOperator
-  @test neural_op.max_u > 0
+  @test neural_op.norm_stats.dmax > 0
   
   # Online Phase
   r_test = Realisation([[0.5f0,0.5f0]])

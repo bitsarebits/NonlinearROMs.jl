@@ -43,15 +43,15 @@ function _is_periodic_node(inode,nodes)
   end
 end
 
-"""
-    coords_matrix(V::SingleFieldFESpace) -> Matrix{Float32}
+# """
+#     coords_matrix(V::SingleFieldFESpace) -> Matrix{Float32}
 
-Full-resolution counterpart of `get_formatted_data`'s coordinate stacking: stacks
-every DoF coordinate of `V` (no spatial subsampling) into a `(D_phys,N_dofs)` matrix.
-Used at inference time, where predictions are required at every DoF regardless of the
-spatial subsampling used during training.
-"""
-coords_matrix(V::SingleFieldFESpace) = Float32.(stack(p -> collect(p.data),vec(get_coords(V))))
+# Full-resolution counterpart of `get_formatted_data`'s coordinate stacking: stacks
+# every DoF coordinate of `V` (no spatial subsampling) into a `(D_phys,N_dofs)` matrix.
+# Used at inference time, where predictions are required at every DoF regardless of the
+# spatial subsampling used during training.
+# """
+# coords_matrix(V::SingleFieldFESpace) = Float32.(stack(p -> collect(p.data),vec(get_coords(V))))
 
 struct CoordinateSnapshots{T,N,Tc,Nc,A<:AbstractSnapshots{T,N},B<:AbstractArray{Tc,Nc}} <:AbstractSnapshots{T,N}
   snaps::A
@@ -91,6 +91,19 @@ function Base.setindex!(s::CoordinateSnapshots{T,N},v,i::Vararg{Integer,N}) wher
   setindex!(s.snaps,v,i...)
 end
 
+struct InputData{A<:AbstractRealisation,Tc,Nc,B<:AbstractArray{Tc,Nc}}
+  r::A
+  coords::B
+end
+
+function InputData(r::AbstractRealisation,V::FESpace)
+  coords = get_coords(V)
+  InputData(r,coords)
+end
+
+ParamDataStructures.get_realisation(s::InputData) = s.r
+get_coords(s::InputData) = s.coords
+
 function get_formatted_data(::Type{T},s::AbstractSnapshots) where T
   data = T.(get_all_data(s))
   params = T.(matrix_of_params(get_realisation(s)))
@@ -103,6 +116,12 @@ function get_formatted_data(::Type{T},s::CoordinateSnapshots) where T
   return (data,params,coords)
 end
 
-function get_formatted_data(s::AbstractSnapshots)
+function get_formatted_data(::Type{T},s::InputData) where T
+  params = T.(matrix_of_params(get_realisation(s)))
+  coords = T.(stack(p -> collect(p.data),vec(get_coords(s))))
+  return (params,coords)
+end
+
+function get_formatted_data(s)
   get_formatted_data(Float32,s)
 end
