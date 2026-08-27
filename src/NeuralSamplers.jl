@@ -54,7 +54,11 @@ for T in (:(typeof(identity)),:Function,:Integer)
   @eval begin
     function sample(s::Sampler{<:$T},x::CoordinateSnapshots,axis=1)
       data = sample(s,x.snaps,axis)
-      pdata = ConsecutiveParamArray(data)
+      # ConsecutiveParamVector convention: a (dofs,params*times) matrix, params
+      # varying fastest. `data` is (dofs,params) for steady snapshots (already
+      # correct) or (dofs,params,times) for transient ones; merging the trailing
+      # axes via `reshape` produces exactly that column order either way.
+      pdata = ConsecutiveParamArray(reshape(data,size(data,1),:))
       sx = Snapshots(pdata,get_realisation(x))
       xx = sample(s,get_coords(x))
       CoordinateSnapshots(sx,xx)
@@ -174,6 +178,10 @@ for (f,g) in zip((:get_param_ids,:get_time_ids),(:num_params,:num_times))
       step = s.strategy
       ids = 1:step:$g(x)
       return ids
+    end
+
+    function $f(s::Sampler{Nothing},x::Snapshots)
+      return 1:$g(x)
     end
   end
 end

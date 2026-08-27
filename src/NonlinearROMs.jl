@@ -79,7 +79,6 @@ include("TrainingLogs.jl")
 
 export CoordinateSnapshots
 export get_coords
-export coords_matrix
 include("CoordinateSnapshots.jl")
 
 export Sampler

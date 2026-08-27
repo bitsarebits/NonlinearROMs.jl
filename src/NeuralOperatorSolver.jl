@@ -24,39 +24,6 @@ function RBSteady.reduced_operator(
 end
 
 """
-    struct NeuralOperator{O,T,Mod,M,S,NStats} <: RBOperator{O,T}
-      op::ParamOperator{O,T}
-      model::Mod
-      model_weights::M
-      model_states::S
-      norm_stats::NStats
-    end
-
-The evaluated Reduced Basis Operator for Neural Operators.
-This struct is the direct output of the offline training phase and is passed to the `solve` function during the online phase.
-
-It stores the high-fidelity operator, the trained model, the optimized network weights and states, and the normalization statistics used to scale the data.
-
-# Fields
-- `op`: The original high-fidelity parametric operator.
-- `model`: The trained Neural Operator architecture.
-- `model_weights`: The optimized weights of the network.
-- `model_states`: The states of the network (e.g., Batch Normalization running averages, if any).
-- `norm_stats`: A [`NeuralStats`](@ref) bundling the z-score statistics used to normalize the
-  inputs and the absolute maximum scalar value of the snapshot target data (`norm_stats.dmax`),
-  used for the final denormalization of the network predictions.
-"""
-struct NeuralOperator{O,T,A} <: RBOperator{O,T}
-  op::ParamOperator{O,T}
-  model::A
-  model_weights
-  model_states
-  norm_stats
-end
-
-ParamSteady.get_fe_operator(op::NeuralOperator) = op.op
-
-"""
     reduced_operator(
       solver::NeuralSolver,
       feop::ParamOperator,
@@ -101,7 +68,7 @@ solver_ft = NeuralSolver(LUSolver(), DeepONetReduction(ft_strategy))
 new_op = reduced_operator(solver_ft, feop, snapshots_new, pretrained_op; update_stats=false)
 ```
 """
-function retrain_operator(
+function RBSteady.reduced_operator(
   solver::NeuralSolver,
   feop::ParamOperator,
   s::AbstractSnapshots,
@@ -124,7 +91,7 @@ end
 
 Automatically extracts the high-fidelity operator (`feop`) from `pretrained_op.op` and invokes the main fine-tuning routine.
 """
-function retrain_operator(
+function RBSteady.reduced_operator(
   solver::NeuralSolver,
   s::AbstractSnapshots,
   pretrained_op::NeuralOperator;
@@ -132,7 +99,7 @@ function retrain_operator(
   )
 
   feop = pretrained_op.op
-  retrain_operator(solver,feop,s,pretrained_op;update_stats=update_stats)
+  reduced_operator(solver,feop,s,pretrained_op;update_stats=update_stats)
 end
 
 function Algebra.solve(

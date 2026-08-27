@@ -3,93 +3,7 @@
 const CDEV = Lux.cpu_device()
 const XDEV = Lux.reactant_device(;force=true)
 
-struct ZscoreStats{A<:AbstractVector,B<:AbstractVector}
-  μ::A
-  σ::B
-end
-
-function ZscoreStats(data::AbstractMatrix;normalise=false)
-  if normalise
-    stats = ZscoreStats(data;normalise=false)
-    normalise!(data,stats)
-    return stats
-  end
-  μ = dropdims(mean(data,dims=2),dims=2)
-  σ = dropdims(std(data,dims=2),dims=2)
-  # Avoid dividing by zero if a feature is constant
-  for i in eachindex(σ)
-    iszero(σ[i]) && (σ[i] = one(eltype(σ)))
-  end
-  return ZscoreStats(μ,σ)
-end
-
-struct NeuralStats{T<:Real,A<:ZscoreStats,B<:ZscoreStats}
-  dmax::T
-  pscore::A 
-  xscore::B
-end
-
-function NeuralStats(data,params,coords;normalise=false)
-  dmax = maximum(abs,data)
-  normalise && (data ./= dmax)
-  input = ZscoreStats(params;normalise)
-  output = ZscoreStats(coords;normalise)
-  NeuralStats(dmax,input,output)
-end
-
-"""
-    (model::Lux.AbstractLuxLayer)(inputs,ps,st,stats::NeuralStats)
-
-Applies `model` and denormalises its output using `stats.dmax`, so callers don't need to
-separately track and re-apply the target's normalisation scale after inference.
-"""
-function (model::Lux.AbstractLuxLayer)(inputs,ps,st,stats::NeuralStats)
-  pred,st = model(inputs,ps,st)
-  pred .*= stats.dmax
-  return pred,st
-end
-
-# Training loop
-
-"""
-    train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger::TrainingLog)
-
-Generic Lux/Reactant/Enzyme training loop shared by DeepONet and NOMAD. `to_device_batch`
-maps one raw batch yielded by `dataloader` to the `(inputs,target)` pair (already moved to
-`XDEV`) expected by `Lux.Training.single_train_step!`; this is the only piece that differs
-between the two architectures (DeepONet pairs each batch with a fixed set of trunk query
-points, NOMAD's coordinates are already part of the per-row batch).
-"""
-function train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger::TrainingLog)
-  init!(logger)
-
-  Reactant.with_config(;dot_general_precision=Reactant.PrecisionConfig.HIGH) do
-    for epoch in 1:logger.max_epochs
-      local current_loss = 0.0f0
-
-      for raw_batch in dataloader
-        batch_dev = to_device_batch(raw_batch)
-
-        _,loss_val,_,train_state = Lux.Training.single_train_step!(
-          Lux.AutoEnzyme(),
-          Lux.MSELoss(),
-          batch_dev,
-          train_state;
-          return_gradients=Val(false)
-        )
-        current_loss += Float32(loss_val)
-      end
-      current_loss /= length(dataloader)
-
-      step_scheduler!(lr_scheduler,train_state.optimizer_state,epoch,current_loss;verbose=logger.verbose)
-
-      update!(logger,epoch,current_loss)
-    end
-  end
-
-  finalize!(logger)
-  return train_state.parameters,train_state.states
-end
+# Training calls
 
 function train_deeponet!(train_state,dataloader,x_data_dev,strategy)
   lr_scheduler = get_scheduler(strategy)
@@ -103,32 +17,6 @@ function train_nomad!(train_state,dataloader,strategy)
   logger = get_logger(strategy)
   to_device_batch(((u_batch,y_batch),v_batch)) = ((u_batch |> XDEV,y_batch |> XDEV),v_batch |> XDEV)
   train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger)
-end
-
-# Regression networks (hyper-reduction): MultiLayerPerceptron / AutoEncoder
-
-"""
-    struct TrainedModel{C,P,S} <: NeuralNetwork
-      chain::C
-      ps::P
-      st::S
-    end
-
-A trained Lux `chain` bundled with its optimised parameters/states, evaluable
-as `(a::TrainedModel)(x::AbstractMatrix) -> AbstractMatrix` via the standard
-`Arrays.evaluate!`/`return_cache` interface. Returned by [`TrainedNeuralNetwork`](@ref)
-for [`MultiLayerPerceptron`](@ref) strategies.
-"""
-struct TrainedModel{C,P,S} <: NeuralNetwork
-  chain::C
-  ps::P
-  st::S
-end
-
-Arrays.return_cache(a::TrainedModel,x::AbstractMatrix) = nothing
-
-function Arrays.evaluate!(cache,a::TrainedModel,x::AbstractMatrix)
-  first(a.chain(Float32.(x),a.ps,a.st))
 end
 
 """
@@ -156,42 +44,9 @@ function TrainedNeuralNetwork(strategy::NeuralOpStrategy{<:MultiLayerPerceptron}
   train_state = Lux.Training.TrainState(chain,ps,st,strategy.optimiser.opt)
 
   to_device_batch((xb,yb)) = (xb |> XDEV,yb |> XDEV)
-  ps_trained,st_trained = train_model!(
+  train_model!(
     train_state,dataloader,strategy.optimiser.lr_scheduler,to_device_batch;logger=strategy.trainlog
   )
-
-  TrainedModel(chain,ps_trained |> CDEV,Lux.testmode(st_trained) |> CDEV)
-end
-
-"""
-    struct TrainedAutoEncoder{C,P,S} <: NeuralNetwork
-      chain::C
-      ps::P
-      st::S
-    end
-
-A trained [`AutoEncoder`](@ref), `chain = Lux.Chain(encoder,decoder)`.
-`(a::TrainedAutoEncoder)(z)` applies the **decoder** (latent → high-dim), matching
-`evaluate!`'s contract; use [`encode`](@ref)/[`decode`](@ref) to access either half directly.
-"""
-struct TrainedAutoEncoder{C,P,S} <: NeuralNetwork
-  chain::C
-  ps::P
-  st::S
-end
-
-Arrays.return_cache(a::TrainedAutoEncoder,x::AbstractMatrix) = nothing
-
-function Arrays.evaluate!(cache,a::TrainedAutoEncoder,z::AbstractMatrix)
-  decode(a,z)
-end
-
-function encode(a::TrainedAutoEncoder,X::AbstractMatrix)
-  first(a.chain.layers.layer_1(Float32.(X),a.ps.layer_1,a.st.layer_1))
-end
-
-function decode(a::TrainedAutoEncoder,Z::AbstractMatrix)
-  first(a.chain.layers.layer_2(Float32.(Z),a.ps.layer_2,a.st.layer_2))
 end
 
 function TrainedNeuralNetwork(strategy::NeuralOpStrategy{<:AutoEncoder},::AbstractRealisation,coeff)
@@ -213,37 +68,9 @@ function TrainedNeuralNetwork(strategy::NeuralOpStrategy{<:AutoEncoder},::Abstra
   train_state = Lux.Training.TrainState(chain,ps,st,strategy.optimiser.opt)
 
   to_device_batch((xb,yb)) = (xb |> XDEV,yb |> XDEV)
-  ps_trained,st_trained = train_model!(
+  train_model!(
     train_state,dataloader,strategy.optimiser.lr_scheduler,to_device_batch;logger=strategy.trainlog
   )
-
-  TrainedAutoEncoder(chain,ps_trained |> CDEV,Lux.testmode(st_trained) |> CDEV)
-end
-
-"""
-    struct TrainedAutoDecoder{D,P,S,L} <: NeuralNetwork
-      decoder::D
-      ps::P
-      st::S
-      latent_codes::L
-    end
-
-A trained [`AutoDecoder`](@ref). `latent_codes[:,i]` is the learned latent
-representation of the `i`-th training snapshot; `evaluate!` applies the decoder
-(`latent_dim × k → n_h × k`). Use [`infer_latent`](@ref) to fit a latent code for
-an unseen snapshot.
-"""
-struct TrainedAutoDecoder{D,P,S,L} <: NeuralNetwork
-  decoder::D
-  ps::P
-  st::S
-  latent_codes::L
-end
-
-Arrays.return_cache(a::TrainedAutoDecoder,z::AbstractMatrix) = nothing
-
-function Arrays.evaluate!(cache,a::TrainedAutoDecoder,z::AbstractMatrix)
-  first(a.decoder(Float32.(z),a.ps,a.st))
 end
 
 """
@@ -285,43 +112,10 @@ function TrainedNeuralNetwork(strategy::NeuralOpStrategy{<:AutoDecoder},::Abstra
   train_state = Lux.Training.TrainState(chain,ps,st,strategy.optimiser.opt)
 
   to_device_batch((xb,yb)) = (xb |> XDEV,yb |> XDEV)
-  ps_trained,st_trained = train_model!(
+  train_model!(
     train_state,dataloader,strategy.optimiser.lr_scheduler,to_device_batch;logger=strategy.trainlog
   )
-
-  ps_trained_cdev = ps_trained |> CDEV
-  TrainedAutoDecoder(
-    decoder,ps_trained_cdev.layer_2,Lux.testmode(st_trained).layer_2 |> CDEV,ps_trained_cdev.layer_1.codes
-  )
 end
-
-"""
-    infer_latent(a::TrainedAutoDecoder,x_target::AbstractVector,strategy::NeuralOpStrategy) -> AbstractVector
-
-Fit a latent code `z` for an unseen snapshot `x_target` by minimising the mean
-squared reconstruction error with the decoder weights fixed, using `strategy.optimiser.opt`
-and `strategy.epochs`.
-"""
-function infer_latent(a::TrainedAutoDecoder,x_target::AbstractVector,strategy::NeuralOpStrategy)
-  latent_dim = size(a.latent_codes,1)
-  T = Float32
-  z = randn(T,latent_dim) .* T(0.01)
-  X_t = reshape(T.(x_target),:,1)
-  opt_state = Optimisers.setup(strategy.optimiser.opt,z)
-  for _ in 1:strategy.epochs
-    grad = ForwardDiff.gradient(z) do z_
-      X̂ = first(a.decoder(reshape(z_,:,1),a.ps,a.st))
-      sum(abs2,X̂ .- X_t)/length(X_t)
-    end
-    opt_state,z = Optimisers.update!(opt_state,z,grad)
-  end
-  z
-end
-
-# VariationalAutoEncoder: reparameterisation trick + KL loss. Trained eagerly on
-# CPU (no Reactant/XLA tracing), since the reparameterisation step samples fresh
-# `randn` values on every forward pass -- under XLA tracing those would be baked
-# in as a constant at compile time instead of resampled at each call.
 
 struct VAELayer{E,D} <: Lux.AbstractLuxContainerLayer{(:encoder,:decoder)}
   encoder::E
@@ -391,8 +185,6 @@ struct TrainedVAE{E,D,PE,SE,PD,SD} <: NeuralNetwork
   st_dec::SD
   latent_dim::Int
 end
-
-Arrays.return_cache(a::TrainedVAE,z::AbstractMatrix) = nothing
 
 function Arrays.evaluate!(cache,a::TrainedVAE,z::AbstractMatrix)
   decode(a,z)
@@ -469,7 +261,7 @@ function train_neural_operator(
   data,params,coords = get_formatted_data(Float32,target)
 
   # Normalisation
-  stats = NeuralStats(data,params,coords;normalise=true)
+  stats = NormStats(data,params,coords;normalise=true)
 
   # Building the DeepONet
   rng = Random.default_rng()
@@ -491,10 +283,9 @@ function train_neural_operator(
   )
 
   # Executing the pipeline
-  ps_trained,st_trained = train_deeponet!(train_state,dataloader,coords_dev,strategy)
-  st_test = Lux.testmode(st_trained) |> CDEV
+  trained = train_deeponet!(train_state,dataloader,coords_dev,strategy)
 
-  return model,ps_trained |> CDEV,st_test,stats
+  return model,trained.parameters,trained.states,stats
 end
 
 function train_neural_operator(
@@ -514,9 +305,13 @@ function train_neural_operator(
 
   # Normalisation
   if update_stats
-    stats = NeuralStats(data,params,coords;normalise=true)
+    stats = NormStats(data,params,coords;normalise=true)
   else
     stats = pretrained_op.norm_stats
+    expected_branch_in = length(stats.pscore.μ)
+    expected_trunk_in = length(stats.xscore.μ)
+    @assert size(params,1) == expected_branch_in "Branch dimension mismatch: expected $expected_branch_in, got $(size(params,1)). Check the parameter sampler."
+    @assert size(coords,1) == expected_trunk_in "Trunk dimension mismatch: expected $expected_trunk_in, got $(size(coords,1))."
     normalise!((data,params,coords),stats)
   end
 
@@ -538,10 +333,9 @@ function train_neural_operator(
   )
 
   # Executing the pipeline
-  ps_trained,st_trained = train_deeponet!(train_state,dataloader,coords_dev,strategy)
-  st_test = Lux.testmode(st_trained) |> CDEV
+  trained = train_deeponet!(train_state,dataloader,coords_dev,strategy)
 
-  return model,ps_trained |> CDEV,st_test,stats
+  return model,trained.parameters,trained.states,stats
 end
 
 function train_neural_operator(
@@ -560,7 +354,7 @@ function train_neural_operator(
   N_tot = size(dout,2)
 
   # Normalisation
-  stats = NeuralStats(dout,pin,xin;normalise=true)
+  stats = NormStats(dout,pin,xin;normalise=true)
 
   # Building the NOMAD model
   rng = Random.default_rng()
@@ -581,10 +375,9 @@ function train_neural_operator(
   )
 
   # Running the pipeline
-  ps_trained,st_trained = train_nomad!(train_state,dataloader,strategy)
-  st_test = Lux.testmode(st_trained) |> CDEV
+  trained = train_nomad!(train_state,dataloader,strategy)
 
-  return model,ps_trained |> CDEV,st_test,stats
+  return model,trained.parameters,trained.states,stats
 end
 
 function train_neural_operator(
@@ -606,9 +399,13 @@ function train_neural_operator(
 
   # Normalisation
   if update_stats
-    stats = NeuralStats(dout,pin,xin;normalise=true)
+    stats = NormStats(dout,pin,xin;normalise=true)
   else
     stats = pretrained_op.norm_stats
+    expected_sensors = length(stats.pscore.μ)
+    expected_coords = length(stats.xscore.μ)
+    @assert size(pin,1) == expected_sensors "Sensors input dimension mismatch: expected $expected_sensors, got $(size(pin,1))."
+    @assert size(xin,1) == expected_coords "Coords input dimension mismatch: expected $expected_coords, got $(size(xin,1))."
     normalise!((dout,pin,xin),stats)
   end
 
@@ -629,10 +426,9 @@ function train_neural_operator(
   )
 
   # Running the pipeline
-  ps_trained,st_trained = train_nomad!(train_state,dataloader,strategy)
-  st_test = Lux.testmode(st_trained) |> CDEV
+  trained = train_nomad!(train_state,dataloader,strategy)
 
-  return model,ps_trained |> CDEV,st_test,stats
+  return model,trained.parameters,trained.states,stats
 end
 
 # utils
@@ -660,13 +456,13 @@ function normalise!(data::AbstractMatrix,stats::ZscoreStats)
   data
 end
 
-function normalise!(inout::NTuple{2,AbstractArray},stats::NeuralStats)
+function normalise!(inout::NTuple{2,AbstractArray},stats::NormStats)
   a,b = inout
   normalise!(a,stats.pscore)
   normalise!(b,stats.xscore)
 end
 
-function normalise!(inout::NTuple{3,AbstractArray},stats::NeuralStats)
+function normalise!(inout::NTuple{3,AbstractArray},stats::NormStats)
   a,b,c = inout
   a ./= stats.dmax
   normalise!(b,stats.pscore)

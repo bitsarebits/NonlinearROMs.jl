@@ -12,7 +12,7 @@ function train_neural_operator(
   data,params,coords = get_formatted_data(Float32,target)
 
   # Normalisation
-  stats = NeuralStats(data,params,coords;normalise=true)
+  stats = NormStats(data,params,coords;normalise=true)
 
   # Building the DeepONet
   rng = Random.default_rng()
@@ -34,10 +34,9 @@ function train_neural_operator(
   )
 
   # Executing the pipeline
-  ps_trained,st_trained = train_deeponet!(train_state,dataloader,coords_dev,strategy)
-  st_test = Lux.testmode(st_trained) |> CDEV
+  trained = train_deeponet!(train_state,dataloader,coords_dev,strategy)
 
-  return model,ps_trained |> CDEV,st_test,stats
+  return model,trained.parameters,trained.states,stats
 end
 
 function train_neural_operator(
@@ -57,7 +56,7 @@ function train_neural_operator(
 
   # Normalisation
   if update_stats
-    stats = NeuralStats(data,params,coords;normalise=true)
+    stats = NormStats(data,params,coords;normalise=true)
   else
     stats = pretrained_op.norm_stats
     normalise!((data,params,coords),stats)
@@ -81,10 +80,9 @@ function train_neural_operator(
   )
 
   # Executing the pipeline
-  ps_trained,st_trained = train_deeponet!(train_state,dataloader,coords_dev,strategy)
-  st_test = Lux.testmode(st_trained) |> CDEV
+  trained = train_deeponet!(train_state,dataloader,coords_dev,strategy)
 
-  return model,ps_trained |> CDEV,st_test,stats
+  return model,trained.parameters,trained.states,stats
 end
 
 function train_neural_operator(
@@ -103,7 +101,7 @@ function train_neural_operator(
   N_tot = size(dout,2)
 
   # Normalisation
-  stats = NeuralStats(dout,pin,xin;normalise=true)
+  stats = NormStats(dout,pin,xin;normalise=true)
 
   # Building the NOMAD model
   rng = Random.default_rng()
@@ -124,10 +122,9 @@ function train_neural_operator(
   )
 
   # Running the pipeline
-  ps_trained,st_trained = train_nomad!(train_state,dataloader,strategy)
-  st_test = Lux.testmode(st_trained) |> CDEV
+  trained = train_nomad!(train_state,dataloader,strategy)
 
-  return model,ps_trained |> CDEV,st_test,stats
+  return model,trained.parameters,trained.states,stats
 end
 
 function train_neural_operator(
@@ -149,7 +146,7 @@ function train_neural_operator(
 
   # Normalisation
   if update_stats
-    stats = NeuralStats(dout,pin,xin;normalise=true)
+    stats = NormStats(dout,pin,xin;normalise=true)
   else
     stats = pretrained_op.norm_stats
     normalise!((dout,pin,xin),stats)
@@ -172,8 +169,7 @@ function train_neural_operator(
   )
 
   # Running the pipeline
-  ps_trained,st_trained = train_nomad!(train_state,dataloader,strategy)
-  st_test = Lux.testmode(st_trained) |> CDEV
+  trained = train_nomad!(train_state,dataloader,strategy)
 
-  return model,ps_trained |> CDEV,st_test,stats
+  return model,trained.parameters,trained.states,stats
 end

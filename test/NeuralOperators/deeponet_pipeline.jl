@@ -71,7 +71,10 @@ end
   r = TransientRealisation(Realisation(params),times,0.0)
   
   u_data = rand(Float64,N_dofs,n_samples,N_time)
-  snaps = Snapshots(ConsecutiveParamArray(u_data),VectorDofMap(N_dofs),r)
+  # GridapROMs' transient Snapshots constructor expects the underlying ConsecutiveParamArray
+  # to wrap a flat (N_dofs,n_samples*N_time) array (param varying fastest); a plain `reshape`
+  # of the (N_dofs,n_samples,N_time) array achieves exactly that column order.
+  snaps = Snapshots(ConsecutiveParamArray(reshape(u_data,N_dofs,n_samples*N_time)),VectorDofMap(N_dofs),r)
 
   # Solver Transient (trunk input is 1D coords + time = 2)
   strategy = NeuralOpStrategy(DeepONet(2,2;width=8,depth=1),epochs=1,verbose=false)

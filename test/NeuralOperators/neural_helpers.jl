@@ -121,25 +121,11 @@ end
 end
 
 @testset "Coordinate Extraction" begin
-  # Small 1D mesh: domain (0,1) with 2 elements -> Nodes: 0.0,0.5,1.0
+  # Small 1D mesh: domain (0,1) with 2 elements -> Nodes: 0.0,0.25,0.5,0.75,1.0
   model = CartesianDiscreteModel((0.0,1.0),(2,))
-  reffe = ReferenceFE(lagrangian,Float64,1)
-
-  # Space with no boundary conditions -> 3 Free DoFs
-  # get_coords works on any SingleFieldFESpace: no special DoF
-  # ordering is required, since coordinates are mapped consistently with the
-  # space's own free-dof numbering via direct interpolation.
-  V = FESpace(model,reffe)
-
-  points = get_coords(V)
-  coords = coords_matrix(V)
-
-  @test length(points) == 3
-  @test size(coords) == (1,3) # (D_phys,N_dofs)
-
-  expected_coords = Float32[0.0 0.5 1.0]
-
-  @test sort(vec(coords)) ≈ sort(vec(expected_coords))
+  reffe = ReferenceFE(lagrangian,Float64,2)
+  V = LexicographicFESpace(model,reffe)
+  @test get_coords(V) == Point{Float64}[[0.0,0.25,0.5,0.75,1.0]]
 end
 
 # Dummy Scheduler to test interface fallback

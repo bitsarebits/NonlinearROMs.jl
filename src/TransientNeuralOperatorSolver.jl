@@ -34,7 +34,9 @@ function Algebra.solve(
   pred_3d = reshape(pred_cpu,N_dofs,N_time,n_samples)
   pred_3d = permutedims(pred_3d,(1,3,2))
 
-  x̂ = Snapshots(ConsecutiveParamArray(pred_3d),VectorDofMap(N_dofs),r)
+  # ConsecutiveParamVector convention: a (dofs,params*times) matrix, params varying
+  # fastest — `reshape` of the (N_dofs,n_samples,N_time) array gives exactly that order.
+  x̂ = Snapshots(ConsecutiveParamArray(reshape(pred_3d,N_dofs,:)),VectorDofMap(N_dofs),r)
   stats = CostTracker(t,nruns=n_samples,name="DeepONet Transient Inference")
 
   return x̂,stats
@@ -71,7 +73,9 @@ function Algebra.solve(
   pred_3d = reshape(pred_cpu,N_dofs,N_time,n_samples)
   pred_3d = permutedims(pred_3d,(1,3,2))
 
-  x̂ = Snapshots(ConsecutiveParamArray(pred_3d),VectorDofMap(N_dofs),r)
+  # ConsecutiveParamVector convention: a (dofs,params*times) matrix, params varying
+  # fastest — `reshape` of the (N_dofs,n_samples,N_time) array gives exactly that order.
+  x̂ = Snapshots(ConsecutiveParamArray(reshape(pred_3d,N_dofs,:)),VectorDofMap(N_dofs),r)
   stats = CostTracker(t,nruns=n_samples,name="NOMAD Transient Inference")
 
   return x̂,stats
