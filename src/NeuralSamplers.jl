@@ -7,9 +7,9 @@ Sampler() = Sampler(identity)
 NoSampler() = Sampler(nothing)
 
 sample(args...) = @notimplemented
-sample(s::Sampler,x::AbstractArray,args...) = @abstractmethod
+sample(s::Sampler,x,args...) = @abstractmethod
 
-sample(s::Sampler{typeof(identity)},x::AbstractArray,args...) = x
+sample(s::Sampler{typeof(identity)},x,args...) = x
 
 function sample(s::Sampler{<:Function},x::AbstractArray,axis=1)
   y = selectdim(x,axis,1)
@@ -28,6 +28,22 @@ function sample(s::Sampler{<:Integer},x::AbstractArray,axis=1)
   selectdim(x,axis,1:step:size(x,axis))
 end
 
+function sample(s::Sampler{<:Function},x::Realisation,args...)
+  map(x) do μ
+    s.strategy(μ)
+  end |> Realisation
+end
+
+function sample(s::Sampler{<:Integer},x::Realisation,args...)
+  step = s.strategy
+  x[1:step:num_params(x)]
+end
+
+function sample(s::Sampler,x::TransientRealisation,args...)
+  p = sample(s,get_params(x),args...)
+  TransientRealisation(p,get_times(x),get_initial_time(x))
+end
+
 function sample(s::Sampler,x::BlockSnapshots,axis=1)
   @notimplemented "Do this!"
 end
@@ -37,7 +53,9 @@ end
 for T in (:(typeof(identity)),:Function,:Integer)
   @eval begin
     function sample(s::Sampler{<:$T},x::CoordinateSnapshots,axis=1)
-      sx = sample(s,x.snaps,axis)
+      data = sample(s,x.snaps,axis)
+      pdata = ConsecutiveParamArray(data)
+      sx = Snapshots(pdata,get_realisation(x))
       xx = sample(s,get_coords(x))
       CoordinateSnapshots(sx,xx)
     end
@@ -62,32 +80,36 @@ function NeuralSampler(;space_step=1,param_step=1,time_step=nothing)
 end
 
 function sample(s::NeuralSampler,x::AbstractArray{<:Point})
-  points = sample(s.space_sampler,vec(x))
-  Float32.(stack(p -> collect(p.data),vec(points)))
+  sample(s.space_sampler,vec(x))
 end
 
-function param_sample(s::NeuralSampler{A,Nothing},x::Snapshots) where A
-  @notimplemented
-end
-
-function param_sample(s::NeuralSampler{A,typeof(identity)},x::Snapshots) where A
+function param_sample(s::Sampler{typeof(identity)},x::Snapshots)
   x
 end
 
-function param_sample(s::NeuralSampler,x::Snapshots)
-  select_snapshots(x,get_param_ids(s.param_sampler,x))
+function param_sample(s::Sampler{<:Function},x::Snapshots)
+  r = sample(s,get_realisation(x))
+  Snapshots(get_param_data(x),get_dof_map(x),r)
 end
 
-function time_sample(s::NeuralSampler{A,Nothing},x::TransientSnapshots) where A
-  @notimplemented
+function param_sample(s::Sampler,x::Snapshots)
+  select_snapshots(x,get_param_ids(s,x))
 end
 
-function time_sample(s::NeuralSampler{A,typeof(identity)},x::TransientSnapshots) where A
+function param_sample(s::NeuralSampler,x::Snapshots) 
+  param_sample(s.param_sampler,x)
+end
+
+function time_sample(s::Sampler{typeof(identity)},x::TransientSnapshots) 
   x
 end
 
-function time_sample(s::NeuralSampler,x::TransientSnapshots)
-  select_times(x,get_time_ids(s.time_sampler,x))
+function time_sample(s::Sampler,x::TransientSnapshots)
+  select_times(x,get_time_ids(s,x))
+end
+
+function time_sample(s::NeuralSampler,x::TransientSnapshots) 
+  time_sample(s.time_sampler,x)
 end
 
 const SteadyNeuralSampler{A,B} = NeuralSampler{A,B,Nothing}
@@ -95,7 +117,12 @@ const SteadyNeuralSampler{A,B} = NeuralSampler{A,B,Nothing}
 function sample(s::SteadyNeuralSampler,x::SteadySnapshots)
   sp = param_sample(s,x)
   space_axis = 1
-  sample(sp,x,space_axis)
+  sample(s.space_sampler,sp,space_axis)
+end
+
+function sample(s::SteadyNeuralSampler,x::SteadyCoordinateSnapshots)
+  sp = param_sample(s,x.snaps)
+  sample(s.space_sampler,CoordinateSnapshots(sp,x.coords))
 end
 
 const TransientNeuralSampler{A,B,C} = NeuralSampler{A,B,C}
@@ -104,7 +131,13 @@ function sample(s::TransientNeuralSampler,x::TransientSnapshots)
   xp = param_sample(s,x)
   xpt = time_sample(s,xp)
   space_axis = 1
-  sample(xpt,x,space_axis)
+  sample(s.space_sampler,xpt,space_axis)
+end
+
+function sample(s::TransientNeuralSampler,x::TransientCoordinateSnapshots)
+  xp = param_sample(s,x.snaps)
+  xpt = time_sample(s,xp)
+  sample(s.space_sampler,CoordinateSnapshots(xpt,x.coords))
 end
 
 get_space_ids(s::NeuralSampler,args...) = get_ids(s.space_sampler,args...)

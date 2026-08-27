@@ -43,23 +43,13 @@ function _is_periodic_node(inode,nodes)
   end
 end
 
-"""
-    coords_matrix(V::SingleFieldFESpace) -> Matrix{Float32}
-
-Full-resolution counterpart of `sample(sampler::NeuralSampler,get_coords(V))`: stacks
-every DoF coordinate of `V` (no spatial subsampling) into a `(D_phys,N_dofs)` matrix.
-Used at inference time, where predictions are required at every DoF regardless of the
-spatial subsampling used during training.
-"""
-coords_matrix(V::SingleFieldFESpace) = Float32.(stack(p -> collect(p.data),vec(get_coords(V))))
-
-struct CoordinateSnapshots{T,N,Tc,Nc,A<:AbstractSnapshots{T,N}} <:AbstractSnapshots{T,N}
+struct CoordinateSnapshots{T,N,Tc,Nc,A<:AbstractSnapshots{T,N},B<:AbstractArray{Tc,Nc}} <:AbstractSnapshots{T,N}
   snaps::A
-  coords::Array{Tc,Nc}
+  coords::B
 end
 
 function CoordinateSnapshots(snaps::AbstractSnapshots,V::FESpace)
-  coords = coords_matrix(V)
+  coords = get_coords(V)
   CoordinateSnapshots(snaps,coords)
 end
 
@@ -89,4 +79,20 @@ end
 
 function Base.setindex!(s::CoordinateSnapshots{T,N},v,i::Vararg{Integer,N}) where {T,N}
   setindex!(s.snaps,v,i...)
+end
+
+function get_formatted_data(::Type{T},s::AbstractSnapshots) where T
+  data = T.(get_all_data(s))
+  params = T.(matrix_of_params(get_realisation(s)))
+  return (data,params)
+end
+
+function get_formatted_data(::Type{T},s::CoordinateSnapshots) where T
+  data,params = get_formatted_data(T,s.snaps)
+  coords = T.(stack(p -> collect(p.data),vec(get_coords(s))))
+  return (data,params,coords)
+end
+
+function get_formatted_data(s::AbstractSnapshots)
+  get_formatted_data(Float32,s)
 end

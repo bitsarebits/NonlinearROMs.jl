@@ -123,7 +123,7 @@ export resolve_batch_size
 export XDEV
 export CDEV
 export build_model
-export compute_zscore_stats
+export ZscoreStats
 export normalise!
 include("NeuralOperatorTraining.jl")
 include("TransientNeuralOperatorTraining.jl")

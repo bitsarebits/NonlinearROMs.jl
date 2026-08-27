@@ -108,6 +108,11 @@ function NeuralOpStrategy(
   )
 end
 
+get_sampler(strategy::NeuralOpStrategy) = strategy.sampler
+get_optimiser(strategy::NeuralOpStrategy) = strategy.optimiser.opt
+get_scheduler(strategy::NeuralOpStrategy) = strategy.optimiser.lr_scheduler
+get_logger(strategy::NeuralOpStrategy) = strategy.trainlog
+
 struct NeuralOpReduction{A<:NeuralNetwork} <: Reduction{NoReductionStyle,EuclideanNorm}
   strategy::NeuralOpStrategy{A}
 end

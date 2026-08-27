@@ -66,8 +66,8 @@ function train_neural_operator(
   max_u = maximum(abs,u_train)
   u_train ./= max_u
 
-  branch_stats = compute_zscore_stats(params_matrix;normalise=true)
-  trunk_stats = compute_zscore_stats(x_train;normalise=true)
+  branch_stats = ZscoreStats(params_matrix;normalise=true)
+  trunk_stats = ZscoreStats(x_train;normalise=true)
 
   # DeepONet architecture
   # Input of the Trunk Net is D_phys + 1
@@ -168,8 +168,8 @@ function train_neural_operator(
   if update_stats
     strategy.trainlog.verbose && @info "Updating the normalization statistics."
     max_u = maximum(abs,u_train)
-    branch_stats = compute_zscore_stats(params_matrix)
-    trunk_stats = compute_zscore_stats(x_train)
+    branch_stats = ZscoreStats(params_matrix)
+    trunk_stats = ZscoreStats(x_train)
   else
     strategy.trainlog.verbose && @info "Keeping the normalization statistics from the pre-trained model."
     max_u = pretrained_op.max_u
@@ -279,8 +279,8 @@ function train_neural_operator(
   max_u = maximum(abs,v_out)
   v_out ./= max_u
 
-  u_in_stats = compute_zscore_stats(u_in;normalise=true)
-  y_in_stats = compute_zscore_stats(y_in;normalise=true)
+  u_in_stats = ZscoreStats(u_in;normalise=true)
+  y_in_stats = ZscoreStats(y_in;normalise=true)
 
   # Building the NOMAD model
   # The network input is: sensors + (physical coordinates + 1 for time)
@@ -382,8 +382,8 @@ function train_neural_operator(
   if update_stats
     strategy.trainlog.verbose && @info "Updating the normalization statistics."
     max_u = maximum(abs,v_out)
-    u_in_stats = compute_zscore_stats(u_in)
-    y_in_stats = compute_zscore_stats(y_in)
+    u_in_stats = ZscoreStats(u_in)
+    y_in_stats = ZscoreStats(y_in)
   else
     strategy.trainlog.verbose && @info "Keeping the normalization statistics from the pre-trained model."
     max_u = pretrained_op.max_u

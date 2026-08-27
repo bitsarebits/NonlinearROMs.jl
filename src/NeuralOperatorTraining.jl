@@ -3,13 +3,14 @@
 const CDEV = Lux.cpu_device()
 const XDEV = Lux.reactant_device(;force=true)
 
-function resolve_batch_size(batch_config::Int,total_samples::Int)
-  return batch_config <= 0 ? total_samples : min(batch_config,total_samples)
+struct ZscoreStats{A<:AbstractVector,B<:AbstractVector}
+  μ::A
+  σ::B
 end
 
-function compute_zscore_stats(data::AbstractMatrix;normalise=false)
+function ZscoreStats(data::AbstractMatrix;normalise=false)
   if normalise 
-    stats = compute_zscore_stats(data;normalise=false)
+    stats = ZscoreStats(data;normalise=false)
     normalise!(data,stats)
     return stats
   end
@@ -19,22 +20,18 @@ function compute_zscore_stats(data::AbstractMatrix;normalise=false)
   for i in eachindex(σ)
     iszero(σ[i]) && (σ[i] = one(eltype(σ)))
   end
-  return (μ=Float32.(μ),σ=Float32.(σ))
+  return ZscoreStats(μ,σ)
 end
 
-normalise!(args...) = @abstractmethod
-
-function normalise!(data::AbstractVector,law::NamedTuple)
-  data .-= law.μ
-  data ./= law.σ
-  data
+struct NeuralStats{A<:ZscoreStats,B<:ZscoreStats}
+  input::A 
+  output::B
 end
 
-function normalise!(data::AbstractMatrix,law::NamedTuple)
-  for v in eachcol(data)
-    normalise!(v,law)
-  end
-  data 
+function NeuralStats(in,out;kwargs...)
+  input = ZscoreStats(in;kwargs...)
+  output = ZscoreStats(out;kwargs...)
+  NeuralStats(input,output)
 end
 
 # Build model
@@ -96,6 +93,10 @@ function build_model(model::NOMAD)
   LuxNOMAD(approximator_net,decoder_net)
 end
 
+function build_model(strategy::NeuralOpStrategy)
+  build_model(strategy.model)
+end
+
 # Training loop
 
 """
@@ -138,12 +139,16 @@ function train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger
   return train_state.parameters,train_state.states
 end
 
-function train_deeponet!(train_state,dataloader,x_data_dev,lr_scheduler;logger::TrainingLog)
+function train_deeponet!(train_state,dataloader,x_data_dev,strategy)
+  lr_scheduler = get_scheduler(strategy)
+  logger = get_logger(strategy)
   to_device_batch((f_batch,u_batch)) = ((f_batch |> XDEV,x_data_dev),u_batch |> XDEV)
   train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger)
 end
 
-function train_nomad!(train_state,dataloader,lr_scheduler;logger::TrainingLog)
+function train_nomad!(train_state,dataloader,strategy)
+  lr_scheduler = get_scheduler(strategy)
+  logger = get_logger(strategy)
   to_device_batch(((u_batch,y_batch),v_batch)) = ((u_batch |> XDEV,y_batch |> XDEV),v_batch |> XDEV)
   train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger)
 end
@@ -504,67 +509,110 @@ function train_neural_operator(
   s::AbstractSnapshots
   )
 
-  strategy = red.strategy
+  strategy = get_strategy(red)
 
   # Data extraction
-  # RBSteady => get_all_data(s) is 2D: (N_dofs,N_samples)
   sx = CoordinateSnapshots(s,get_test(feop))
-  target = sample(strategy.sampler,sx)
-  
-  # target_data_full = Float32.(get_all_data(s))
-  # N_dofs = size(target_data_full,1)
+  target = sample(get_sampler(strategy),sx)
+  data,params,coords = get_formatted_data(Float32,target)
 
-  # idx_x = get_space_ids(strategy.sampler,N_dofs)
-  target_data = @views target_data_full[idx_x,:]
-
-  r = get_realisation(s)
-  raw_params = Float32.(matrix_of_params(r))
-  n_samples = size(raw_params,2)
-
-  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
-
-  # normalization
-  max_u = maximum(abs,target_data)
-  target_data ./= max_u
-
-  # DoF coordinates extraction (Trunk input)
-  V = get_test(feop)
-  x_train = sample(strategy.sampler,get_coords(V)) # shape: (D_phys,N_dofs_reduced)
-
-  # Input normalization
-  branch_stats = compute_zscore_stats(params_matrix;normalise=true)
-  trunk_stats = compute_zscore_stats(x_train;normalise=true)
+  # Normalisation
+  maxd = maximum(abs,data); data ./= maxd
+  stats = NeuralStats(params,coords;normalise=true)
 
   # Building the DeepONet
-  deepONet = build_model(strategy.model)
+  rng = Random.default_rng()
+  Random.seed!(rng,42)
+
+  model = build_model(strategy)
+  opt = get_optimiser(strategy)
+  coords_dev = coords |> XDEV
+  ps,st = Lux.setup(rng,model) |> XDEV
+  train_state = Lux.Training.TrainState(model,ps,st,opt)
 
   # Dataloader and setup
-  bs = resolve_batch_size(strategy.batch_size,n_samples)
+  bs = resolve_batch_size(strategy,num_params(s))
   dataloader = MLUtils.DataLoader(
-    (params_matrix,target_data);
+    (params,data);
     batchsize=bs,
     shuffle=true,
     partial=false
   )
 
-  x_data_dev = x_train |> XDEV
-
-  Random.seed!(42)
-  ps,st = Lux.setup(Random.default_rng(),deepONet) |> XDEV
-
-  train_state = Lux.Training.TrainState(deepONet,ps,st,strategy.optimiser.opt)
-
   # Executing the pipeline
-  ps_trained,st_trained = train_deeponet!(
-    train_state,dataloader,x_data_dev,strategy.optimiser.lr_scheduler;logger=strategy.trainlog
-  )
-
+  ps_trained,st_trained = train_deeponet!(train_state,dataloader,coords_dev,strategy)
   st_test = Lux.testmode(st_trained) |> CDEV
 
-  norm_stats = (branch = branch_stats,trunk = trunk_stats)
-
-  return deepONet,ps_trained |> CDEV,st_test,norm_stats,Float32(max_u)
+  return model,ps_trained |> CDEV,st_test,stats,maxd
 end
+
+# function train_neural_operator(
+#   red::DeepONetReduction,
+#   feop::ParamOperator,
+#   s::AbstractSnapshots
+#   )
+
+#   strategy = red.strategy
+
+#   # Data extraction
+#   # RBSteady => get_all_data(s) is 2D: (N_dofs,N_samples)
+#   sx = CoordinateSnapshots(s,get_test(feop))
+#   target = sample(strategy.sampler,sx)
+  
+#   # target_data_full = Float32.(get_all_data(s))
+#   # N_dofs = size(target_data_full,1)
+
+#   # idx_x = get_space_ids(strategy.sampler,N_dofs)
+#   target_data = @views target_data_full[idx_x,:]
+
+#   r = get_realisation(s)
+#   raw_params = Float32.(matrix_of_params(r))
+#   n_samples = size(raw_params,2)
+
+#   params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
+
+#   # normalization
+#   max_u = maximum(abs,target_data)
+#   target_data ./= max_u
+
+#   # DoF coordinates extraction (Trunk input)
+#   V = get_test(feop)
+#   x_train = sample(strategy.sampler,get_coords(V)) # shape: (D_phys,N_dofs_reduced)
+
+#   # Input normalization
+#   branch_stats = ZscoreStats(params_matrix;normalise=true)
+#   trunk_stats = ZscoreStats(x_train;normalise=true)
+
+#   # Building the DeepONet
+#   deepONet = build_model(strategy.model)
+
+#   # Dataloader and setup
+#   bs = resolve_batch_size(strategy.batch_size,n_samples)
+#   dataloader = MLUtils.DataLoader(
+#     (params_matrix,target_data);
+#     batchsize=bs,
+#     shuffle=true,
+#     partial=false
+#   )
+
+#   x_data_dev = x_train |> XDEV
+
+#   Random.seed!(42)
+#   ps,st = Lux.setup(Random.default_rng(),deepONet) |> XDEV
+
+#   train_state = Lux.Training.TrainState(deepONet,ps,st,strategy.optimiser.opt)
+
+#   # Executing the pipeline
+#   ps_trained,st_trained = train_deeponet!(
+#     train_state,dataloader,x_data_dev,strategy.optimiser.lr_scheduler;logger=strategy.trainlog
+#   )
+
+#   st_test = Lux.testmode(st_trained) |> CDEV
+
+#   norm_stats = (branch = branch_stats,trunk = trunk_stats)
+
+#   return deepONet,ps_trained |> CDEV,st_test,norm_stats,Float32(max_u)
+# end
 
 function train_neural_operator(
   red::DeepONetReduction,
@@ -606,8 +654,8 @@ function train_neural_operator(
   if update_stats
     strategy.trainlog.verbose && @info "Recomputing the normalization statistics."
     max_u = maximum(abs,target_data)
-    branch_stats = compute_zscore_stats(params_matrix)
-    trunk_stats = compute_zscore_stats(x_train)
+    branch_stats = ZscoreStats(params_matrix)
+    trunk_stats = ZscoreStats(x_train)
   else
     strategy.trainlog.verbose && @info "Inheriting the normalization statistics from the pre-trained model."
     max_u = pretrained_op.max_u
@@ -700,8 +748,8 @@ function train_neural_operator(
   max_u = maximum(abs,v_out)
   v_out ./= max_u
 
-  u_in_stats = compute_zscore_stats(u_in;normalise=true)
-  y_in_stats = compute_zscore_stats(y_in;normalise=true)
+  u_in_stats = ZscoreStats(u_in;normalise=true)
+  y_in_stats = ZscoreStats(y_in;normalise=true)
 
   # Building the NOMAD model
   nomad_net = build_model(strategy.model)
@@ -789,8 +837,8 @@ function train_neural_operator(
   if update_stats
     strategy.trainlog.verbose && @info "Recomputing the normalization statistics."
     max_u = maximum(abs,v_out)
-    u_in_stats = compute_zscore_stats(u_in)
-    y_in_stats = compute_zscore_stats(y_in)
+    u_in_stats = ZscoreStats(u_in)
+    y_in_stats = ZscoreStats(y_in)
   else
     strategy.trainlog.verbose && @info "Inheriting the normalization statistics from the pre-trained model."
     max_u = pretrained_op.max_u
@@ -827,4 +875,29 @@ function train_neural_operator(
   norm_stats = (u_in = u_in_stats,y_in = y_in_stats)
 
   return nomad_net,ps_trained |> CDEV,st_test,norm_stats,Float32(max_u)
+end
+
+# utils
+
+function resolve_batch_size(batch_config::Int,total_samples::Int)
+  return batch_config <= 0 ? total_samples : min(batch_config,total_samples)
+end
+
+function resolve_batch_size(strategy::NeuralOpStrategy,total_samples::Int)
+  resolve_batch_size(strategy.batch_size,total_samples)
+end
+
+normalise!(args...) = @abstractmethod
+
+function normalise!(data::AbstractVector,law::NamedTuple)
+  data .-= law.μ
+  data ./= law.σ
+  data
+end
+
+function normalise!(data::AbstractMatrix,law::NamedTuple)
+  for v in eachcol(data)
+    normalise!(v,law)
+  end
+  data 
 end
