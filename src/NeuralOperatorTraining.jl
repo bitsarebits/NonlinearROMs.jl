@@ -501,7 +501,7 @@ function train_neural_operator(
   red::DeepONetReduction,
   feop::ParamOperator,
   s::AbstractSnapshots,
-  pretrained_op::NeuralRBOperator;
+  pretrained_op::NeuralOperator;
   update_stats::Bool=false
   )
 
@@ -591,8 +591,8 @@ function train_neural_operator(
   red::NOMADReduction,
   feop::ParamOperator,
   s::AbstractSnapshots,
-  pretrained_op::NeuralRBOperator;
-  update_stats::Bool = false
+  pretrained_op::NeuralOperator;
+  update_stats::Bool=false
   )
 
   strategy = get_strategy(red)
@@ -669,8 +669,8 @@ end
 function normalise!(inout::NTuple{3,AbstractArray},stats::NeuralStats)
   a,b,c = inout
   a ./= stats.dmax
-  normalise!(b,stats.xscore)
-  normalise!(c,stats.dscore)
+  normalise!(b,stats.pscore)
+  normalise!(c,stats.xscore)
 end
 
 function _flatten(

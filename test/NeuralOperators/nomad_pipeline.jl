@@ -43,12 +43,12 @@ Gridap.FESpaces.get_test(::MockTransientOpNOMAD) = LexicographicFESpace(MockMode
     verbose=false
   )
   reduction = NOMADReduction(strategy)
-  solver = NeuralOpSolver(LUSolver(),reduction)
+  solver = NeuralSolver(LUSolver(),reduction)
 
   # Offline Phase
   neural_op = reduced_operator(solver,feop,snaps)
   
-  @test neural_op isa NeuralRBOperator
+  @test neural_op isa NeuralOperator
   @test neural_op.norm_stats.dmax > 0
   
   # Online Phase
@@ -71,7 +71,7 @@ end
   # coords dim is 1D coords + time = 2
   strategy = NeuralOpStrategy(NOMAD(2,2;width=8,depth=1),epochs=1,verbose=false)
   reduction = NOMADReduction(strategy)
-  solver = NeuralOpSolver(LUSolver(),reduction)
+  solver = NeuralSolver(LUSolver(),reduction)
 
   neural_op = reduced_operator(solver,feop,snaps)
   x_hat,stats = solve(solver,neural_op,r)
@@ -89,7 +89,7 @@ end
   # Setup solver
   strategy = NeuralOpStrategy(NOMAD(2,1;width=8,depth=1),epochs=1,verbose=false)
   reduction = NOMADReduction(strategy)
-  solver = NeuralOpSolver(LUSolver(),reduction)
+  solver = NeuralSolver(LUSolver(),reduction)
 
   # First training
   pretrained_op = reduced_operator(solver,feop,snaps)
@@ -97,7 +97,7 @@ end
   # Fine-tuning
   new_op = reduced_operator(solver,feop,snaps,pretrained_op; update_stats=true)
   
-  @test new_op isa NeuralRBOperator
+  @test new_op isa NeuralOperator
   @test new_op.model === pretrained_op.model
 end
 
@@ -108,7 +108,7 @@ end
     # Base training with 2 sensors/parameters
     snaps_base = Snapshots(ConsecutiveParamArray(rand(Float64,3,2)),VectorDofMap(3),Realisation([rand(Float32,2) for _ in 1:2]))
     strategy = NeuralOpStrategy(NOMAD(2,1;width=4,depth=1),epochs=1,verbose=false)
-    solver = NeuralOpSolver(LUSolver(),NOMADReduction(strategy))
+    solver = NeuralSolver(LUSolver(),NOMADReduction(strategy))
     
     pretrained_op = reduced_operator(solver,feop,snaps_base)
 

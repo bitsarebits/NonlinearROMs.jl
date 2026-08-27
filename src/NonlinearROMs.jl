@@ -103,8 +103,8 @@ export NeuralOpStrategy
 export NeuralOpReduction
 export DeepONetReduction
 export NOMADReduction
-export NeuralOpSolver
-export NeuralRBOperator
+export NeuralSolver
+export NeuralOperator
 include("NeuralOperatorReductions.jl")
 
 export train_neural_operator

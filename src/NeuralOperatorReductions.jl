@@ -181,9 +181,9 @@ for (f,m) in ((:DeepONetReduction,:DeepONet),(:NOMADReduction,:NOMAD))
 end
 
 """
-    const NeuralOpSolver{A,C<:NeuralOpReduction} = GlobalRBSolver{A,C,Nothing,Nothing}
+    const NeuralSolver{A,C<:NeuralOpReduction} = GlobalRBSolver{A,C,Nothing,Nothing}
 
-    NeuralOpSolver(fesolver::GridapType, reduction::NeuralOpReduction)
+    NeuralSolver(fesolver::GridapType, reduction::NeuralOpReduction)
 
 Initializes the Reduced Basis Solver for Neural Operators.
 
@@ -196,7 +196,7 @@ Initializes the Reduced Basis Solver for Neural Operators.
 **Minimal Default Initialization:**
 ```julia
 # Default hyperparameters (20000 epochs, full-batch, etc.), 2 params -> Branch, 2D coords -> Trunk
-solver = NeuralOpSolver(LUSolver(), DeepONetReduction(model=DeepONet(2,2)))
+solver = NeuralSolver(LUSolver(), DeepONetReduction(model=DeepONet(2,2)))
 ```
 **Custom Initialization:**
 ```julia
@@ -207,44 +207,11 @@ strategy = NeuralOpStrategy(
   epochs = 1000
   )
 reduction = DeepONetReduction(strategy)
-solver = NeuralOpSolver(ThetaMethod(LUSolver(), dt, θ), reduction)
+solver = NeuralSolver(ThetaMethod(LUSolver(), dt, θ), reduction)
 ```
 """
-const NeuralOpSolver{A,C<:NeuralOpReduction} = GlobalRBSolver{A,C,Nothing,Nothing}
+const NeuralSolver{A,C<:NeuralOpReduction} = GlobalRBSolver{A,C,Nothing,Nothing}
 
-function NeuralOpSolver(fesolver,reduction::NeuralOpReduction)
+function NeuralSolver(fesolver,reduction::NeuralOpReduction)
   RBSolver(fesolver,GlobalContext(),reduction,nothing,nothing)
 end
-
-"""
-    struct NeuralRBOperator{O,T,Mod,M,S,NStats} <: RBOperator{O,T}
-      op::ParamOperator{O,T}
-      model::Mod
-      model_weights::M
-      model_states::S
-      norm_stats::NStats
-    end
-
-The evaluated Reduced Basis Operator for Neural Operators.
-This struct is the direct output of the offline training phase and is passed to the `solve` function during the online phase.
-
-It stores the high-fidelity operator, the trained model, the optimized network weights and states, and the normalization statistics used to scale the data.
-
-# Fields
-- `op`: The original high-fidelity parametric operator.
-- `model`: The trained Neural Operator architecture.
-- `model_weights`: The optimized weights of the network.
-- `model_states`: The states of the network (e.g., Batch Normalization running averages, if any).
-- `norm_stats`: A [`NeuralStats`](@ref) bundling the z-score statistics used to normalize the
-  inputs and the absolute maximum scalar value of the snapshot target data (`norm_stats.dmax`),
-  used for the final denormalization of the network predictions.
-"""
-struct NeuralRBOperator{O,T,Mod,M,S,NStats} <: RBOperator{O,T}
-  op::ParamOperator{O,T}
-  model::Mod
-  model_weights::M
-  model_states::S
-  norm_stats::NStats
-end
-
-ParamSteady.get_fe_operator(op::NeuralRBOperator) = op.op

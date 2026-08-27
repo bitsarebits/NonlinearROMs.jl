@@ -116,9 +116,60 @@ function get_formatted_data(::Type{T},s::CoordinateSnapshots) where T
   return (data,params,coords)
 end
 
+"""
+    _spacetime_coords(coords_raw::AbstractMatrix,t_grid::AbstractVector) -> Matrix
+
+Builds the flattened `(D_phys+1,N_dofs*N_time)` space-time trunk-input grid used by
+transient DeepONet/NOMAD: for every time value (outer loop) and every spatial DoF
+(inner loop), appends the time as an extra last coordinate. Space varies fastest, so
+the column order matches how `get_formatted_data`/`_flatten` flatten the target data.
+"""
+function _spacetime_coords(coords_raw::AbstractMatrix{T},t_grid::AbstractVector{T}) where T
+  D_phys,N_dofs = size(coords_raw)
+  N_time = length(t_grid)
+  coords = zeros(T,D_phys+1,N_dofs*N_time)
+  col = 1
+  @views for t_val in t_grid
+    for x_idx in 1:N_dofs
+      coords[1:D_phys,col] .= coords_raw[:,x_idx]
+      coords[D_phys+1,col] = t_val
+      col += 1
+    end
+  end
+  return coords
+end
+
+function get_formatted_data(::Type{T},s::TransientCoordinateSnapshots) where T
+  data_3d,params = get_formatted_data(T,s.snaps) # data_3d: (N_dofs,n_samples,N_time)
+  t_grid = T.(get_times(get_realisation(s)))
+  coords_raw = T.(stack(p -> collect(p.data),vec(get_coords(s)))) # (D_phys,N_dofs)
+  coords = _spacetime_coords(coords_raw,t_grid)
+
+  N_dofs,n_samples,N_time = size(data_3d)
+  data = zeros(T,N_dofs*N_time,n_samples)
+  for i in 1:n_samples
+    col = 1
+    for t_idx in 1:N_time, x_idx in 1:N_dofs
+      data[col,i] = data_3d[x_idx,i,t_idx]
+      col += 1
+    end
+  end
+
+  return data,params,coords
+end
+
 function get_formatted_data(::Type{T},s::InputData) where T
   params = T.(matrix_of_params(get_realisation(s)))
   coords = T.(stack(p -> collect(p.data),vec(get_coords(s))))
+  return (params,coords)
+end
+
+function get_formatted_data(::Type{T},s::InputData{<:TransientRealisation}) where T
+  r = get_realisation(s)
+  params = T.(matrix_of_params(r))
+  t_grid = T.(get_times(r))
+  coords_raw = T.(stack(p -> collect(p.data),vec(get_coords(s)))) # (D_phys,N_dofs)
+  coords = _spacetime_coords(coords_raw,t_grid)
   return (params,coords)
 end
 

@@ -58,7 +58,7 @@ strategy_base = NeuralOpStrategy(
     print_every = 500
 )
 
-solver_base = NeuralOpSolver(fesolver,DeepONetReduction(strategy_base))
+solver_base = NeuralSolver(fesolver,DeepONetReduction(strategy_base))
 
 println("\nTraining Base Transient Model...")
 pretrained_op = reduced_operator(solver_base,feop_base,s_base)
@@ -94,7 +94,7 @@ strategy_transfer = NeuralOpStrategy(
     lr_scheduler = ReduceLROnPlateau(patience=100,start_lr=5e-4),
     print_every = 500
 )
-solver_transfer = NeuralOpSolver(fesolver,DeepONetReduction(strategy_transfer))
+solver_transfer = NeuralSolver(fesolver,DeepONetReduction(strategy_transfer))
 
 # update_stats=true forces the model to recompute normalization statistics for the shifted, radically different physical scale
 transfer_op = reduced_operator(solver_transfer,feop_ext,s_ext,pretrained_op;update_stats=true)

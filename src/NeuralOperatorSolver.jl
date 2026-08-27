@@ -1,6 +1,6 @@
 """
     reduced_operator(
-      solver::NeuralOpSolver,
+      solver::NeuralSolver,
       feop::ParamOperator,
       s::AbstractSnapshots
     )
@@ -10,36 +10,69 @@ This method triggers the training loop of the neural network specified in the `s
 
 It automatically extracts the training dataset (parameters/sensors and spatial coordinates) from the snapshots `s` and the FE operator `feop`, normalizes the data, and performs the optimization.
 
-Returns a `NeuralRBOperator` containing the trained network, its optimized weights, and the normalization statistics required for the online phase.
+Returns a `NeuralOperator` containing the trained network, its optimized weights, and the normalization statistics required for the online phase.
 """
 function RBSteady.reduced_operator(
-  solver::NeuralOpSolver,
+  solver::NeuralSolver,
   feop::ParamOperator,
   s::AbstractSnapshots
   )
 
   reduction = get_state_reduction(solver)
   model,ps,st,norm_stats = train_neural_operator(reduction,feop,s)
-  NeuralRBOperator(feop,model,ps,st,norm_stats)
+  NeuralOperator(feop,model,ps,st,norm_stats)
 end
 
 """
+    struct NeuralOperator{O,T,Mod,M,S,NStats} <: RBOperator{O,T}
+      op::ParamOperator{O,T}
+      model::Mod
+      model_weights::M
+      model_states::S
+      norm_stats::NStats
+    end
+
+The evaluated Reduced Basis Operator for Neural Operators.
+This struct is the direct output of the offline training phase and is passed to the `solve` function during the online phase.
+
+It stores the high-fidelity operator, the trained model, the optimized network weights and states, and the normalization statistics used to scale the data.
+
+# Fields
+- `op`: The original high-fidelity parametric operator.
+- `model`: The trained Neural Operator architecture.
+- `model_weights`: The optimized weights of the network.
+- `model_states`: The states of the network (e.g., Batch Normalization running averages, if any).
+- `norm_stats`: A [`NeuralStats`](@ref) bundling the z-score statistics used to normalize the
+  inputs and the absolute maximum scalar value of the snapshot target data (`norm_stats.dmax`),
+  used for the final denormalization of the network predictions.
+"""
+struct NeuralOperator{O,T,A} <: RBOperator{O,T}
+  op::ParamOperator{O,T}
+  model::A
+  model_weights
+  model_states
+  norm_stats
+end
+
+ParamSteady.get_fe_operator(op::NeuralOperator) = op.op
+
+"""
     reduced_operator(
-      solver::NeuralOpSolver,
+      solver::NeuralSolver,
       feop::ParamOperator,
       s::AbstractSnapshots,
-      pretrained_op::NeuralRBOperator;
-      update_stats::Bool = false
+      pretrained_op::NeuralOperator;
+      update_stats::Bool=false
     )
 
 Performs **Fine-Tuning (Continual or Transfer Learning)** on a previously trained Neural Operator.
 It initializes the neural network with the weights and states of the `pretrained_op`, continuing the training using the newly provided snapshots `s` and the configuration defined in `solver`.
 
 # Arguments
-- `solver`: The `NeuralOpSolver` containing the updated training configuration (e.g., lower learning rate, new epochs).
+- `solver`: The `NeuralSolver` containing the updated training configuration (e.g., lower learning rate, new epochs).
 - `feop`: The high-fidelity parametric operator.
 - `s`: The new `Snapshots` dataset for fine-tuning.
-- `pretrained_op`: The previously trained `NeuralRBOperator`.
+- `pretrained_op`: The previously trained `NeuralOperator`.
 
 # Keyword Arguments
 - `update_stats::Bool`: Dictates how data normalization is handled.
@@ -53,7 +86,7 @@ model_arch = DeepONet(2,2)
 
 # Base Training
 base_strategy = NeuralOpStrategy(model_arch, epochs=5000)
-solver_base = NeuralOpSolver(LUSolver(), DeepONetReduction(base_strategy))
+solver_base = NeuralSolver(LUSolver(), DeepONetReduction(base_strategy))
 pretrained_op = reduced_operator(solver_base, feop, snapshots_base)
 
 # Fine-Tuning with a smaller learning rate on a refined dataset
@@ -62,40 +95,40 @@ ft_strategy = NeuralOpStrategy(
   epochs = 1000,
   lr_scheduler = CosineAnnealing(1000, lr_max=1e-5) # Smaller LR
   )
-solver_ft = NeuralOpSolver(LUSolver(), DeepONetReduction(ft_strategy))
+solver_ft = NeuralSolver(LUSolver(), DeepONetReduction(ft_strategy))
 
 # Continual learning (inherits original stats)
 new_op = reduced_operator(solver_ft, feop, snapshots_new, pretrained_op; update_stats=false)
 ```
 """
 function retrain_operator(
-  solver::NeuralOpSolver,
+  solver::NeuralSolver,
   feop::ParamOperator,
   s::AbstractSnapshots,
-  pretrained_op::NeuralRBOperator;
-  update_stats::Bool = false
+  pretrained_op::NeuralOperator;
+  update_stats::Bool=false
   )
 
   reduction = get_state_reduction(solver)
   model,ps,st,norm_stats = train_neural_operator(reduction,feop,s,pretrained_op;update_stats=update_stats)
-  NeuralRBOperator(feop,model,ps,st,norm_stats)
+  NeuralOperator(feop,model,ps,st,norm_stats)
 end
 
 """
     reduced_operator(
-      solver::NeuralOpSolver,
+      solver::NeuralSolver,
       s::AbstractSnapshots,
-      pretrained_op::NeuralRBOperator;
-      update_stats::Bool = false
+      pretrained_op::NeuralOperator;
+      update_stats::Bool=false
     )
 
 Automatically extracts the high-fidelity operator (`feop`) from `pretrained_op.op` and invokes the main fine-tuning routine.
 """
 function retrain_operator(
-  solver::NeuralOpSolver,
+  solver::NeuralSolver,
   s::AbstractSnapshots,
-  pretrained_op::NeuralRBOperator;
-  update_stats::Bool = false
+  pretrained_op::NeuralOperator;
+  update_stats::Bool=false
   )
 
   feop = pretrained_op.op
@@ -103,8 +136,8 @@ function retrain_operator(
 end
 
 function Algebra.solve(
-  solver::NeuralOpSolver{A,<:DeepONetReduction},
-  op::NeuralRBOperator,
+  solver::NeuralSolver{A,<:DeepONetReduction},
+  op::NeuralOperator,
   r::Realisation
   ) where A
 
@@ -129,8 +162,8 @@ function Algebra.solve(
 end
 
 function Algebra.solve(
-  solver::NeuralOpSolver{A,<:NOMADReduction},
-  op::NeuralRBOperator,
+  solver::NeuralSolver{A,<:NOMADReduction},
+  op::NeuralOperator,
   r::Realisation
   ) where A
 

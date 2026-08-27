@@ -4,205 +4,87 @@ function train_neural_operator(
   s::AbstractSnapshots
   )
 
-  strategy = red.strategy
+  strategy = get_strategy(red)
 
   # Data extraction
-  target_data = Float32.(get_all_data(s))     # shape (N_dofs,N_samples,N_time)
+  sx = CoordinateSnapshots(s,get_test(feop))
+  target = sample(get_sampler(strategy),sx)
+  data,params,coords = get_formatted_data(Float32,target)
 
-  r = get_realisation(s)
+  # Normalisation
+  stats = NeuralStats(data,params,coords;normalise=true)
 
-  # Extract the spatial parameters
-  param_realisation = get_params(r)
-  raw_params = Float32.(matrix_of_params(param_realisation))
-  n_samples = size(raw_params,2)
-
-  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
-
-  # Time grid
-  t_grid = Float32.(get_times(r))
-
-  N_dofs = size(target_data,1)
-  N_time = size(target_data,3)
-
-  # Subsampling indices
-  idx_x = get_space_ids(strategy.sampler,N_dofs)
-  idx_t = get_time_ids(strategy.sampler,N_time)
-  N_x_red = length(idx_x)
-  N_t_red = length(idx_t)
-  N_points = N_x_red * N_t_red
-
-  # Coordinates extraction (Trunk input)
-  V = get_test(feop)
-  coords_raw = coords_matrix(V) # Shape: (D_phys,N_dofs)
-  D_phys = size(coords_raw,1)
-
-  # Spatio-Temporal coordinate matrix (D_phys + 1 for time,N_points)
-  x_train = zeros(Float32,D_phys + 1,N_points)
-  col = 1
-  @views for t_idx in idx_t
-    t_val = t_grid[t_idx]
-    for x_idx in idx_x
-      # Copy all the physical dimensions of the spatial point
-      x_train[1:D_phys,col] .= coords_raw[:,x_idx]
-      # Adding time as last coordinate
-      x_train[D_phys+1,col] = t_val
-      col += 1
-    end
-  end
-
-  # Flatten the target data to (N_points,n_samples) to match x_train columns
-  u_train = zeros(Float32,N_points,n_samples)
-  for sample_idx = 1:n_samples
-    col = 1
-    for t_idx in idx_t
-      for x_idx in idx_x
-        u_train[col,sample_idx] = target_data[x_idx,sample_idx,t_idx]
-        col += 1
-      end
-    end
-  end
-
-  # Normalization
-  max_u = maximum(abs,u_train)
-  u_train ./= max_u
-
-  branch_stats = ZscoreStats(params_matrix;normalise=true)
-  trunk_stats = ZscoreStats(x_train;normalise=true)
-
-  # DeepONet architecture
-  # Input of the Trunk Net is D_phys + 1
-  deepONet = build_model(strategy.model)
-
-  # Dataloader and Lux setup
-  bs = resolve_batch_size(strategy.batch_size,n_samples)
-  dataloader =
-    MLUtils.DataLoader((params_matrix,u_train);batchsize=bs,shuffle=true,partial=false)
-
-  x_data_dev = x_train |> XDEV
-
+  # Building the DeepONet
   rng = Random.default_rng()
   Random.seed!(rng,42)
-  ps,st = Lux.setup(rng,deepONet) |> XDEV
 
-  train_state = Lux.Training.TrainState(deepONet,ps,st,strategy.optimiser.opt)
+  model = build_model(strategy)
+  opt = get_optimiser(strategy)
+  coords_dev = coords |> XDEV
+  ps,st = Lux.setup(rng,model) |> XDEV
+  train_state = Lux.Training.TrainState(model,ps,st,opt)
 
-  # Training execution defined in NeuralOperatorTraining.jl
-  ps_trained,st_trained = train_deeponet!(
-    train_state,dataloader,x_data_dev,strategy.optimiser.lr_scheduler;logger=strategy.trainlog
+  # Dataloader and setup
+  bs = resolve_batch_size(strategy,num_params(s))
+  dataloader = MLUtils.DataLoader(
+    (params,data);
+    batchsize=bs,
+    shuffle=true,
+    partial=false
   )
 
+  # Executing the pipeline
+  ps_trained,st_trained = train_deeponet!(train_state,dataloader,coords_dev,strategy)
   st_test = Lux.testmode(st_trained) |> CDEV
 
-  norm_stats = (branch = branch_stats,trunk = trunk_stats)
-
-  return deepONet,ps_trained |> CDEV,st_test,norm_stats,Float32(max_u)
+  return model,ps_trained |> CDEV,st_test,stats
 end
 
 function train_neural_operator(
   red::DeepONetReduction,
   feop::ODEParamOperator,
   s::AbstractSnapshots,
-  pretrained_op::NeuralRBOperator;
-  update_stats::Bool = false
+  pretrained_op::NeuralOperator;
+  update_stats::Bool=false
   )
 
-  strategy = red.strategy
+  strategy = get_strategy(red)
 
   # Data extraction
-  target_data = Float32.(get_all_data(s))  # shape (N_dofs,N_samples,N_time)
-  r = get_realisation(s)
+  sx = CoordinateSnapshots(s,get_test(feop))
+  target = sample(get_sampler(strategy),sx)
+  data,params,coords = get_formatted_data(Float32,target)
 
-  param_realisation = get_params(r)
-  raw_params = Float32.(matrix_of_params(param_realisation))
-  n_samples = size(raw_params,2)
-
-  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
-
-  t_grid = Float32.(get_times(r))
-
-  N_dofs = size(target_data,1)
-  N_time = size(target_data,3)
-
-  idx_x = get_space_ids(strategy.sampler,N_dofs)
-  idx_t = get_time_ids(strategy.sampler,N_time)
-  N_x_red = length(idx_x)
-  N_t_red = length(idx_t)
-  N_points = N_x_red * N_t_red
-
-  V = get_test(feop)
-  coords_raw = coords_matrix(V)
-  D_phys = size(coords_raw,1)
-
-  x_train = zeros(Float32,D_phys + 1,N_points)
-  col = 1
-  @views for t_idx in idx_t
-    t_val = t_grid[t_idx]
-    for x_idx in idx_x
-      x_train[1:D_phys,col] .= coords_raw[:,x_idx]
-      x_train[D_phys+1,col] = t_val
-      col += 1
-    end
-  end
-
-  u_train = zeros(Float32,N_points,n_samples)
-  for sample_idx = 1:n_samples
-    col = 1
-    for t_idx in idx_t
-      for x_idx in idx_x
-        u_train[col,sample_idx] = target_data[x_idx,sample_idx,t_idx]
-        col += 1
-      end
-    end
-  end
-
-  nbranch_in = size(params_matrix,1)
-  ntrunk_in = size(x_train,1)
-
-  # Dimensions check for fine-tuning
-  expected_branch_in = length(pretrained_op.norm_stats.branch.μ)
-  expected_trunk_in = length(pretrained_op.norm_stats.trunk.μ)
-  @assert nbranch_in == expected_branch_in "Branch dimension mismatch: expected $expected_branch_in, got $nbranch_in. Check the parameter sampler."
-  @assert ntrunk_in == expected_trunk_in "Trunk dimension mismatch: expected $expected_trunk_in, got $ntrunk_in."
-
-  # Normalization setup
+  # Normalisation
   if update_stats
-    strategy.trainlog.verbose && @info "Updating the normalization statistics."
-    max_u = maximum(abs,u_train)
-    branch_stats = ZscoreStats(params_matrix)
-    trunk_stats = ZscoreStats(x_train)
+    stats = NeuralStats(data,params,coords;normalise=true)
   else
-    strategy.trainlog.verbose && @info "Keeping the normalization statistics from the pre-trained model."
-    max_u = pretrained_op.max_u
-    branch_stats = pretrained_op.norm_stats.branch
-    trunk_stats = pretrained_op.norm_stats.trunk
+    stats = pretrained_op.norm_stats
+    normalise!((data,params,coords),stats)
   end
 
-  u_train ./= max_u
-  normalise!(params_matrix,branch_stats)
-  normalise!(x_train,trunk_stats)
-
-  # Pretrained Network
-  deepONet = pretrained_op.model
+  # Pretrained model
+  model = pretrained_op.model
+  opt = get_optimiser(strategy)
+  coords_dev = coords |> XDEV
   ps = pretrained_op.model_weights |> XDEV
   st = pretrained_op.model_states |> XDEV
+  train_state = Lux.Training.TrainState(model,ps,st,opt)
 
-  # Dataloader and Optimizer setup
-  bs = resolve_batch_size(strategy.batch_size,n_samples)
-  dataloader = MLUtils.DataLoader((params_matrix,u_train);batchsize=bs,shuffle=true,partial=false)
-
-  x_data_dev = x_train |> XDEV
-
-  train_state = Lux.Training.TrainState(deepONet,ps,st,strategy.optimiser.opt)
-
-  # Training
-  ps_trained,st_trained = train_deeponet!(
-    train_state,dataloader,x_data_dev,strategy.optimiser.lr_scheduler;logger=strategy.trainlog
+  # Dataloader and setup
+  bs = resolve_batch_size(strategy,num_params(s))
+  dataloader = MLUtils.DataLoader(
+    (params,data);
+    batchsize=bs,
+    shuffle=true,
+    partial=false
   )
 
+  # Executing the pipeline
+  ps_trained,st_trained = train_deeponet!(train_state,dataloader,coords_dev,strategy)
   st_test = Lux.testmode(st_trained) |> CDEV
-  norm_stats = (branch = branch_stats,trunk = trunk_stats)
 
-  return deepONet,ps_trained |> CDEV,st_test,norm_stats,Float32(max_u)
+  return model,ps_trained |> CDEV,st_test,stats
 end
 
 function train_neural_operator(
@@ -211,213 +93,87 @@ function train_neural_operator(
   s::AbstractSnapshots
   )
 
-  strategy = red.strategy
+  strategy = get_strategy(red)
 
   # Data extraction
-  target_data = Float32.(get_all_data(s))  # shape (N_dofs,N_samples,N_time)
-  r = get_realisation(s)
+  sx = CoordinateSnapshots(s,get_test(feop))
+  target = sample(get_sampler(strategy),sx)
+  data,params,coords = get_formatted_data(Float32,target)
+  dout,pin,xin = _flatten(data,params,coords) # Flattening for NOMAD
+  N_tot = size(dout,2)
 
-  # Extract the spatial parameters (sensors or Branch input)
-  param_realisation = get_params(r)
-  raw_params = Float32.(matrix_of_params(param_realisation))
-  n_samples = size(raw_params,2)
-
-  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
-  n_sensors = size(params_matrix,1)
-
-  # Time grid
-  t_grid = Float32.(get_times(r))
-
-  N_dofs = size(target_data,1)
-  N_time = size(target_data,3)
-
-  # Subsampling indices
-  idx_x = get_space_ids(strategy.sampler,N_dofs)
-  idx_t = get_time_ids(strategy.sampler,N_time)
-  N_x_red = length(idx_x)
-  N_t_red = length(idx_t)
-
-  # Computing total number of points
-  N_points = N_x_red * N_t_red
-  N_tot = N_points * n_samples
-
-  # Coordinates extraction (Trunk input)
-  V = get_test(feop)
-  coords_raw = coords_matrix(V) # Shape: (D_phys,N_dofs)
-  x_red = @views coords_raw[:,idx_x]
-  D_phys = size(x_red,1)
-
-  # Flattening for NOMAD
-  u_in = zeros(Float32,n_sensors,N_tot)
-  y_in = zeros(Float32,D_phys + 1,N_tot)  # D_phys + 1 for time
-  v_out = zeros(Float32,1,N_tot)
-
-  col = 1
-  @views for sample_idx in 1:n_samples
-    sensor_vals = params_matrix[:,sample_idx]
-
-    for t_idx in idx_t
-      t_val = t_grid[t_idx]
-
-      for (x_idx_reduced,x_idx_full) in enumerate(idx_x)
-        # Replicating the sensor for that sample
-        u_in[:,col] .= sensor_vals
-
-        # Space-time coordinates
-        y_in[1:D_phys,col] .= x_red[:,x_idx_reduced]
-        y_in[D_phys+1,col] = t_val
-
-        # Ground truth extraction from the 3D snapshot
-        v_out[1,col] = target_data[x_idx_full,sample_idx,t_idx]
-
-        col += 1
-      end
-    end
-  end
-
-  # Normalization (z-score and Max)
-  max_u = maximum(abs,v_out)
-  v_out ./= max_u
-
-  u_in_stats = ZscoreStats(u_in;normalise=true)
-  y_in_stats = ZscoreStats(y_in;normalise=true)
+  # Normalisation
+  stats = NeuralStats(dout,pin,xin;normalise=true)
 
   # Building the NOMAD model
-  # The network input is: sensors + (physical coordinates + 1 for time)
-  nomad_net = build_model(strategy.model)
+  rng = Random.default_rng()
+  Random.seed!(rng,42)
 
-  # Dataloader and Lux setup
-  bs = resolve_batch_size(strategy.batch_size,N_tot)
+  model = build_model(strategy)
+  opt = get_optimiser(strategy)
+  ps,st = Lux.setup(rng,model) |> XDEV
+  train_state = Lux.Training.TrainState(model,ps,st,opt)
+
+  # DataLoader and Lux setup
+  bs = resolve_batch_size(strategy,N_tot)
   dataloader = MLUtils.DataLoader(
-    ((u_in,y_in),v_out);
+    ((pin,xin),dout);
     batchsize=bs,
     shuffle=true,
     partial=false
   )
 
-  rng = Random.default_rng()
-  Random.seed!(rng,42)
-  ps,st = Lux.setup(rng,nomad_net) |> XDEV
-
-  train_state = Lux.Training.TrainState(nomad_net,ps,st,strategy.optimiser.opt)
-
   # Running the pipeline
-  ps_trained,st_trained = train_nomad!(
-    train_state,dataloader,strategy.optimiser.lr_scheduler;logger=strategy.trainlog
-  )
-
+  ps_trained,st_trained = train_nomad!(train_state,dataloader,strategy)
   st_test = Lux.testmode(st_trained) |> CDEV
 
-  # norm_stats
-  norm_stats = (u_in = u_in_stats,y_in = y_in_stats)
-
-  return nomad_net,ps_trained |> CDEV,st_test,norm_stats,Float32(max_u)
+  return model,ps_trained |> CDEV,st_test,stats
 end
 
 function train_neural_operator(
   red::NOMADReduction,
   feop::ODEParamOperator,
   s::AbstractSnapshots,
-  pretrained_op::NeuralRBOperator;
-  update_stats::Bool = false
+  pretrained_op::NeuralOperator;
+  update_stats::Bool=false
   )
 
-  strategy = red.strategy
+  strategy = get_strategy(red)
 
-  # Data Extraction
-  target_data = Float32.(get_all_data(s))
-  r = get_realisation(s)
+  # Data extraction
+  sx = CoordinateSnapshots(s,get_test(feop))
+  target = sample(get_sampler(strategy),sx)
+  data,params,coords = get_formatted_data(Float32,target)
+  dout,pin,xin = _flatten(data,params,coords) # Flattening for NOMAD
+  N_tot = size(dout,2)
 
-  param_realisation = get_params(r)
-  raw_params = Float32.(matrix_of_params(param_realisation))
-  n_samples = size(raw_params,2)
-
-  params_matrix = Float32.(sample(strategy.sampler.param_sampler,raw_params,2))
-  n_sensors = size(params_matrix,1)
-
-  t_grid = Float32.(get_times(r))
-
-  N_dofs = size(target_data,1)
-  N_time = size(target_data,3)
-
-  idx_x = get_space_ids(strategy.sampler,N_dofs)
-  idx_t = get_time_ids(strategy.sampler,N_time)
-  N_x_red = length(idx_x)
-  N_t_red = length(idx_t)
-
-  N_points = N_x_red * N_t_red
-  N_tot = N_points * n_samples
-
-  V = get_test(feop)
-  coords_raw = coords_matrix(V)
-  x_red = @views coords_raw[:,idx_x]
-  D_phys = size(x_red,1)
-
-  u_in = zeros(Float32,n_sensors,N_tot)
-  y_in = zeros(Float32,D_phys + 1,N_tot)
-  v_out = zeros(Float32,1,N_tot)
-
-  col = 1
-  @views for sample_idx in 1:n_samples
-    sensor_vals = params_matrix[:,sample_idx]
-    for t_idx in idx_t
-      t_val = t_grid[t_idx]
-      for (x_idx_reduced,x_idx_full) in enumerate(idx_x)
-        u_in[:,col] .= sensor_vals
-        y_in[1:D_phys,col] .= x_red[:,x_idx_reduced]
-        y_in[D_phys+1,col] = t_val
-        v_out[1,col] = target_data[x_idx_full,sample_idx,t_idx]
-        col += 1
-      end
-    end
-  end
-
-  # Dimensionality Check
-  expected_u_in = length(pretrained_op.norm_stats.u_in.μ)
-  expected_y_in = length(pretrained_op.norm_stats.y_in.μ)
-  @assert n_sensors == expected_u_in "Sensors input dimension mismatch: expected $expected_u_in,got $n_sensors."
-  @assert D_phys + 1 == expected_y_in "Coords (Space+Time) input dimension mismatch: expected $expected_y_in,got $(D_phys + 1)."
-
-  # Normalization setup
+  # Normalisation
   if update_stats
-    strategy.trainlog.verbose && @info "Updating the normalization statistics."
-    max_u = maximum(abs,v_out)
-    u_in_stats = ZscoreStats(u_in)
-    y_in_stats = ZscoreStats(y_in)
+    stats = NeuralStats(dout,pin,xin;normalise=true)
   else
-    strategy.trainlog.verbose && @info "Keeping the normalization statistics from the pre-trained model."
-    max_u = pretrained_op.max_u
-    u_in_stats = pretrained_op.norm_stats.u_in
-    y_in_stats = pretrained_op.norm_stats.y_in
+    stats = pretrained_op.norm_stats
+    normalise!((dout,pin,xin),stats)
   end
 
-  v_out ./= max_u
-  normalise!(u_in,u_in_stats)
-  normalise!(y_in,y_in_stats)
-
-  # Pretrained Network
-  nomad_net = pretrained_op.model
+  # Pretrained model
+  model = pretrained_op.model
+  opt = get_optimiser(strategy)
   ps = pretrained_op.model_weights |> XDEV
   st = pretrained_op.model_states |> XDEV
+  train_state = Lux.Training.TrainState(model,ps,st,opt)
 
-  # Dataloader and Optimizer setup
-  bs = resolve_batch_size(strategy.batch_size,N_tot)
+  # DataLoader and Lux setup
+  bs = resolve_batch_size(strategy,N_tot)
   dataloader = MLUtils.DataLoader(
-    ((u_in,y_in),v_out);
+    ((pin,xin),dout);
     batchsize=bs,
     shuffle=true,
     partial=false
   )
 
-  train_state = Lux.Training.TrainState(nomad_net,ps,st,strategy.optimiser.opt)
-
-  # Training
-  ps_trained,st_trained = train_nomad!(
-    train_state,dataloader,strategy.optimiser.lr_scheduler;logger=strategy.trainlog
-  )
-
+  # Running the pipeline
+  ps_trained,st_trained = train_nomad!(train_state,dataloader,strategy)
   st_test = Lux.testmode(st_trained) |> CDEV
-  norm_stats = (u_in = u_in_stats,y_in = y_in_stats)
 
-  return nomad_net,ps_trained |> CDEV,st_test,norm_stats,Float32(max_u)
+  return model,ps_trained |> CDEV,st_test,stats
 end

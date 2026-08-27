@@ -43,12 +43,12 @@ Gridap.FESpaces.get_test(::MockTransientOpDON) = LexicographicFESpace(MockModel,
     verbose=false
   )
   reduction = DeepONetReduction(strategy)
-  solver = NeuralOpSolver(LUSolver(),reduction)
+  solver = NeuralSolver(LUSolver(),reduction)
 
   # Offline Phase
   neural_op = reduced_operator(solver,feop,snaps)
   
-  @test neural_op isa NeuralRBOperator
+  @test neural_op isa NeuralOperator
   @test neural_op.norm_stats.dmax > 0
   
   # Online Phase
@@ -76,7 +76,7 @@ end
   # Solver Transient (trunk input is 1D coords + time = 2)
   strategy = NeuralOpStrategy(DeepONet(2,2;width=8,depth=1),epochs=1,verbose=false)
   reduction = DeepONetReduction(strategy)
-  solver = NeuralOpSolver(LUSolver(),reduction)
+  solver = NeuralSolver(LUSolver(),reduction)
 
   neural_op = reduced_operator(solver,feop,snaps)
   
@@ -97,7 +97,7 @@ end
   # Setup solver
   strategy = NeuralOpStrategy(DeepONet(2,1;width=8,depth=1),epochs=1,verbose=false)
   reduction = DeepONetReduction(strategy)
-  solver = NeuralOpSolver(LUSolver(),reduction)
+  solver = NeuralSolver(LUSolver(),reduction)
 
   # First training
   pretrained_op = reduced_operator(solver,feop,snaps)
@@ -105,7 +105,7 @@ end
   # Fine-tuning
   new_op = reduced_operator(solver,feop,snaps,pretrained_op; update_stats=true)
   
-  @test new_op isa NeuralRBOperator
+  @test new_op isa NeuralOperator
   @test new_op.model === pretrained_op.model
 end
 
@@ -116,7 +116,7 @@ end
     # Base training with 2 sensors/parameters
     snaps_base = Snapshots(ConsecutiveParamArray(rand(Float64,3,2)),VectorDofMap(3),Realisation([rand(Float32,2) for _ in 1:2]))
     strategy = NeuralOpStrategy(DeepONet(2,1;width=4,depth=1),epochs=1,verbose=false)
-    solver = NeuralOpSolver(LUSolver(),DeepONetReduction(strategy))
+    solver = NeuralSolver(LUSolver(),DeepONetReduction(strategy))
     
     pretrained_op = reduced_operator(solver,feop,snaps_base)
 

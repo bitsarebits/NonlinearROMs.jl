@@ -63,7 +63,7 @@ reduction = NOMADReduction(;
     batch_size = 512,
 )
 
-neural_solver = NeuralOpSolver(fesolver,reduction)
+neural_solver = NeuralSolver(fesolver,reduction)
 
 # Offline Phase
 println("[OFFLINE] Training NOMAD Operator...")

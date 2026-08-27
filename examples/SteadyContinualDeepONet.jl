@@ -66,7 +66,7 @@ strategy_base = NeuralOpStrategy(
     print_every = 500
 )
 
-solver_base = NeuralOpSolver(fesolver,DeepONetReduction(strategy_base))
+solver_base = NeuralSolver(fesolver,DeepONetReduction(strategy_base))
 
 println("\nTraining Base Model...")
 pretrained_op = reduced_operator(solver_base,feop_base,s_base)
@@ -98,7 +98,7 @@ strategy_ft = NeuralOpStrategy(
     lr_scheduler = CosineAnnealing(2000,lr_max=1f-4,lr_min=1f-6),
     print_every = 500
 )
-solver_ft = NeuralOpSolver(fesolver,DeepONetReduction(strategy_ft))
+solver_ft = NeuralSolver(fesolver,DeepONetReduction(strategy_ft))
 
 # update_stats=false enforces physical consistency: the model inherits the normalization Z-scores (μ, σ) of the pre-trained domain
 finetuned_op = reduced_operator(solver_ft,feop_ext,s_ext,pretrained_op;update_stats=false)
