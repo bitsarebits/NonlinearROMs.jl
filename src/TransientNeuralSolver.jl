@@ -10,9 +10,8 @@ function Algebra.solve(
   strategy = get_strategy(red)
   V = get_test(op.op)
   coords0 = get_coords(V)
-  input = InputData(r,coords0)
-  input = sample(get_sampler(strategy),input)
-  params,coords = get_formatted_data(Float32,input)
+  r_sampled = sample(get_sampler(strategy),r)
+  params,coords = get_formatted_data(Float32,r_sampled,coords0)
   normalise!((params,coords),op.metadata)
 
   t = @timed begin
@@ -37,9 +36,8 @@ function Algebra.solve(
   strategy = get_strategy(red)
   V = get_test(op.op)
   coords0 = get_coords(V)
-  input = InputData(r,coords0)
-  input = sample(get_sampler(strategy),input)
-  params,coords = get_formatted_data(Float32,input)
+  r_sampled = sample(get_sampler(strategy),r)
+  params,coords = get_formatted_data(Float32,r_sampled,coords0)
   pin,xin = _flatten(params,coords)
   normalise!((pin,xin),op.metadata)
 

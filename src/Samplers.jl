@@ -63,12 +63,6 @@ for T in (:(typeof(identity)),:Function,:Integer)
       xx = sample(s,get_coords(x))
       CoordinateSnapshots(sx,xx)
     end
-
-    function sample(s::Sampler{<:$T},x::InputData,args...)
-      rx = sample(s,get_realisation(x))
-      xx = sample(s,get_coords(x))
-      InputData(rx,xx)
-    end
   end
 end
 
@@ -93,9 +87,10 @@ function sample(s::MultiSampler,x::AbstractArray{<:Point})
   sample(s.space_sampler,vec(x))
 end
 
-function sample(s::MultiSampler,x::InputData)
-  rx = sample(s.param_sampler,get_realisation(x))
-  InputData(rx,get_coords(x))
+# At inference time only the parameter transform applies (never space/time
+# subsampling, since predictions are always required at full resolution).
+function sample(s::MultiSampler,x::AbstractRealisation)
+  sample(s.param_sampler,x)
 end
 
 function param_sample(s::Sampler{typeof(identity)},x::Snapshots)

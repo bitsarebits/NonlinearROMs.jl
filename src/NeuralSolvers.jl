@@ -184,9 +184,8 @@ function Algebra.solve(
   red = get_state_reduction(solver)
   strategy = get_strategy(red)
   coords = get_coords(get_test(op.op))
-  input = InputData(r,coords)
-  input = sample(get_sampler(strategy),input)
-  params,coords = get_formatted_data(Float32,input)
+  r_sampled = sample(get_sampler(strategy),r)
+  params,coords = get_formatted_data(Float32,r_sampled,coords)
   normalise!((params,coords),op.metadata)
 
   # Inference Execution (denormalizes the output internally, using op.metadata.dmax)
@@ -210,9 +209,8 @@ function Algebra.solve(
   red = get_state_reduction(solver)
   strategy = get_strategy(red)
   coords = get_coords(get_test(op.op))
-  input = InputData(r,coords)
-  input = sample(get_sampler(strategy),input)
-  params,coords = get_formatted_data(Float32,input)
+  r_sampled = sample(get_sampler(strategy),r)
+  params,coords = get_formatted_data(Float32,r_sampled,coords)
   pin,xin = _flatten(params,coords)
   normalise!((pin,xin),op.metadata)
 

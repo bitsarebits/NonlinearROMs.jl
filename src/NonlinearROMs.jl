@@ -68,7 +68,6 @@ export ZscoreStats
 export normalise!
 export CoordinateSnapshots
 export get_coords
-export InputData
 export get_formatted_data
 include("Utils.jl")
 
@@ -114,10 +113,13 @@ include("NeuralReductions.jl")
 export TrainedModel
 export TrainedAutoEncoder
 export TrainedAutoDecoder
+export TrainedVAE
 export train_model!
 export infer_latent
 export encode
 export decode
+export XDEV
+export CDEV
 include("NeuralModelsTraining.jl")
 
 export NeuralSolver
@@ -128,10 +130,7 @@ export train
 export train_deeponet!
 export train_nomad!
 export TrainedNeuralNetwork
-export TrainedVAE
 export resolve_batch_size
-export XDEV
-export CDEV
 include("NeuralTraining.jl")
 
 include("TransientNeuralTraining.jl")

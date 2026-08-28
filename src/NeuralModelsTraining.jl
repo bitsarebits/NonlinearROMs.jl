@@ -1,5 +1,5 @@
-
-# Train model 
+const CDEV = Lux.cpu_device()
+const XDEV = Lux.reactant_device(;force=true)
 
 """
     struct TrainedModel{A,B,C} <: NeuralNetwork
@@ -95,6 +95,48 @@ function infer_latent(a::TrainedAutoDecoder,x_target::AbstractVector,strategy::N
 end
 
 """
+    struct TrainedVAE{E,D,PE,SE,PD,SD} <: NeuralNetwork
+      encoder::E
+      decoder::D
+      ps_enc::PE
+      st_enc::SE
+      ps_dec::PD
+      st_dec::SD
+      latent_dim::Int
+    end
+
+A trained [`VariationalAutoEncoder`](@ref). `evaluate!(cache,a,z)` applies the
+**decoder** (latent → high-dim); use [`encode`](@ref) for the encoder direction,
+which returns `(μ,log_var,z)` with a freshly sampled `z`.
+"""
+struct TrainedVAE{E,D,PE,SE,PD,SD} <: NeuralNetwork
+  encoder::E
+  decoder::D
+  ps_enc::PE
+  st_enc::SE
+  ps_dec::PD
+  st_dec::SD
+  latent_dim::Int
+end
+
+function Arrays.evaluate!(cache,a::TrainedVAE,z::AbstractMatrix)
+  decode(a,z)
+end
+
+function encode(a::TrainedVAE,X::AbstractMatrix)
+  enc_out = first(a.encoder(Float32.(X),a.ps_enc,a.st_enc))
+  μ = @views enc_out[1:a.latent_dim,:]
+  log_var = @views enc_out[a.latent_dim+1:end,:]
+  ε = randn(eltype(μ),size(μ))
+  z = μ .+ ε .* exp.(log_var ./ 2)
+  (μ,log_var,z)
+end
+
+function decode(a::TrainedVAE,Z::AbstractMatrix)
+  first(a.decoder(Float32.(Z),a.ps_dec,a.st_dec))
+end
+
+"""
     train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger::TrainingLog)
 
 Generic Lux/Reactant/Enzyme training loop shared by DeepONet and NOMAD. `to_device_batch`
@@ -132,4 +174,31 @@ function train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger
 
   finalize!(logger)
   return TrainedModel(train_state)
+end
+
+function train_vae!(train_state,dataloader,lr_scheduler,loss_fn;logger::TrainingLog)
+  init!(logger)
+
+  for epoch in 1:logger.max_epochs
+    local current_loss = 0.0f0
+
+    for x_batch in dataloader
+      _,loss_val,_,train_state = Lux.Training.single_train_step!(
+        Lux.AutoEnzyme(),
+        loss_fn,
+        x_batch,
+        train_state;
+        return_gradients=Val(false)
+      )
+      current_loss += Float32(loss_val)
+    end
+    current_loss /= length(dataloader)
+
+    step_scheduler!(lr_scheduler,train_state.optimizer_state,epoch,current_loss;verbose=logger.verbose)
+
+    update!(logger,epoch,current_loss)
+  end
+
+  finalize!(logger)
+  return train_state.parameters,train_state.states
 end

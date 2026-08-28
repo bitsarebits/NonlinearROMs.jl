@@ -207,19 +207,6 @@ function Base.setindex!(s::CoordinateSnapshots{T,N},v,i::Vararg{Integer,N}) wher
   setindex!(s.snaps,v,i...)
 end
 
-struct InputData{A<:AbstractRealisation,Tc,Nc,B<:AbstractArray{Tc,Nc}}
-  r::A
-  coords::B
-end
-
-function InputData(r::AbstractRealisation,V::FESpace)
-  coords = get_coords(V)
-  InputData(r,coords)
-end
-
-ParamDataStructures.get_realisation(s::InputData) = s.r
-get_coords(s::InputData) = s.coords
-
 function get_formatted_data(::Type{T},s::AbstractSnapshots) where T
   data = T.(get_all_data(s))
   params = T.(matrix_of_params(get_realisation(s)))
@@ -274,19 +261,18 @@ function get_formatted_data(::Type{T},s::TransientCoordinateSnapshots) where T
   return data,params,coords
 end
 
-function get_formatted_data(::Type{T},s::InputData) where T
-  params = T.(matrix_of_params(get_realisation(s)))
-  coords = T.(stack(p -> collect(p.data),vec(get_coords(s))))
-  return (params,coords)
+function get_formatted_data(::Type{T},r::AbstractRealisation,coords::AbstractArray{<:Point}) where T
+  params = T.(matrix_of_params(r))
+  coords_mat = T.(stack(p -> collect(p.data),vec(coords)))
+  return (params,coords_mat)
 end
 
-function get_formatted_data(::Type{T},s::InputData{<:TransientRealisation}) where T
-  r = get_realisation(s)
+function get_formatted_data(::Type{T},r::TransientRealisation,coords::AbstractArray{<:Point}) where T
   params = T.(matrix_of_params(r))
   t_grid = T.(get_times(r))
-  coords_raw = T.(stack(p -> collect(p.data),vec(get_coords(s)))) # (D_phys,N_dofs)
-  coords = _spacetime_coords(coords_raw,t_grid)
-  return (params,coords)
+  coords_raw = T.(stack(p -> collect(p.data),vec(coords))) # (D_phys,N_dofs)
+  coords_mat = _spacetime_coords(coords_raw,t_grid)
+  return (params,coords_mat)
 end
 
 function get_formatted_data(s)
