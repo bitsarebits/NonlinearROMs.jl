@@ -10,7 +10,7 @@ into its own repository, and plugs back into them via multiple dispatch:
 - **Neural network models** (`NeuralModels.jl`) — `DeepONet`, `NOMAD`,
   `MultiLayerPerceptron`, `AutoEncoder`, `VariationalAutoEncoder`, `AutoDecoder`,
   `GenericNeuralNetwork`; all trained through the same Lux/Reactant/Enzyme
-  pipeline (`NeuralStrategy`, `train_model!`, `TrainedNeuralNetwork`).
+  pipeline (`NeuralStrategy`, `train_model!`, `train_neural_coefficient`).
 
 - **Steady hyper-reduction** — `NNOperatorReduction` (operator regression),
   `NNHyperReduction` (NN-predicted EIM coefficients), `NNOperator`,
@@ -108,12 +108,14 @@ export NeuralStrategy
 export NeuralReduction
 export DeepONetReduction
 export NOMADReduction
+export AutoEncoderReduction
+export AutoDecoderReduction
+export VAEReduction
 include("NeuralReductions.jl")
 
-export TrainedModel
+export TrainedNeuralModel
 export TrainedAutoEncoder
 export TrainedAutoDecoder
-export TrainedVAE
 export train_model!
 export infer_latent
 export encode
@@ -129,7 +131,11 @@ include("NeuralSolvers.jl")
 export train
 export train_deeponet!
 export train_nomad!
-export TrainedNeuralNetwork
+export train_autoencoder!
+export train_autodecoder!
+export train_vae!
+export train_neural_coefficient
+export TrainedVAE
 export resolve_batch_size
 include("NeuralTraining.jl")
 

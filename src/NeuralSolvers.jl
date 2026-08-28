@@ -35,7 +35,7 @@ function NeuralSolver(fesolver,reduction::NeuralReduction)
 end
 
 """
-    struct NeuralOperator{O,T,A<:TrainedModel,B} <: RBOperator{O,T}
+    struct NeuralOperator{O,T,A<:TrainedNeuralModel,B} <: RBOperator{O,T}
       op::ParamOperator{O,T}
       model::A
       metadata::B
@@ -49,13 +49,13 @@ and any normalization metadata needed to scale the data.
 
 # Fields
 - `op`: The original high-fidelity parametric operator.
-- `model`: The trained [`TrainedModel`](@ref) (Lux chain + optimised parameters/states bundled together).
+- `model`: The trained [`TrainedNeuralModel`](@ref) (Lux chain + optimised parameters/states bundled together).
 - `metadata`: Either `nothing` (no normalisation) or a [`NormStats`](@ref) bundling the
   z-score statistics used to normalize the inputs and the absolute maximum scalar value of
   the snapshot target data (`metadata.dmax`), used for the final denormalization of the
   network predictions.
 """
-struct NeuralOperator{O,T,A<:TrainedModel,B} <: RBOperator{O,T}
+struct NeuralOperator{O,T,A<:TrainedNeuralModel,B} <: RBOperator{O,T}
   op::ParamOperator{O,T}
   model::A
   metadata::B

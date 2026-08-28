@@ -13,104 +13,23 @@ function train_nomad!(train_state,dataloader,strategy)
   train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger)
 end
 
-"""
-    TrainedNeuralNetwork(strategy::NeuralStrategy,r::AbstractRealisation,coeff) -> NeuralNetwork
-
-Builds and trains a [`NeuralNetwork`](@ref) from `strategy.model`'s recipe and
-`(r,coeff)` data, through the same Lux/Reactant/Enzyme pipeline used for DeepONet/NOMAD.
-For a [`MultiLayerPerceptron`](@ref), the input/output dimensions are inferred from
-`r`/`coeff` and appended to `strategy.model.hidden_layers`; for an [`AutoEncoder`](@ref),
-`r` is ignored and the network is trained to reconstruct `coeff`.
-"""
-function TrainedNeuralNetwork(strategy::NeuralStrategy{<:MultiLayerPerceptron},r::AbstractRealisation,coeff)
-  x = Float32.(matrix_of_params(r))
-  y = Float32.(_get_data(coeff))
-  nin,nout = size(x,1),size(y,1)
-  n_samples = size(x,2)
-
-  chain = build_lux_chain((nin,strategy.model.hidden_layers...,nout),strategy.model.activation)
-
-  bs = resolve_batch_size(strategy.batch_size,n_samples)
-  dataloader = MLUtils.DataLoader((x,y);batchsize=bs,shuffle=true,partial=false)
-
-  Random.seed!(42)
-  ps,st = Lux.setup(Random.default_rng(),chain) |> XDEV
-  train_state = Lux.Training.TrainState(chain,ps,st,strategy.optimiser.opt)
-
+function train_autoencoder!(train_state,dataloader,strategy)
+  lr_scheduler = get_scheduler(strategy)
+  logger = get_logger(strategy)
   to_device_batch((xb,yb)) = (xb |> XDEV,yb |> XDEV)
-  train_model!(
-    train_state,dataloader,strategy.optimiser.lr_scheduler,to_device_batch;logger=strategy.trainlog
-  )
+  train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger)
 end
 
-function TrainedNeuralNetwork(strategy::NeuralStrategy{<:AutoEncoder},::AbstractRealisation,coeff)
-  X = Float32.(_get_data(coeff))
-  nin = size(X,1)
-  n_samples = size(X,2)
-
-  hidden = strategy.model.hidden_layers[1:end-1]
-  latent_dim = last(strategy.model.hidden_layers)
-  encoder = build_lux_chain((nin,hidden...,latent_dim),strategy.model.activation)
-  decoder = build_lux_chain((latent_dim,reverse(hidden)...,nin),strategy.model.activation)
-  chain = Lux.Chain(encoder,decoder)
-
-  bs = resolve_batch_size(strategy.batch_size,n_samples)
-  dataloader = MLUtils.DataLoader((X,X);batchsize=bs,shuffle=true,partial=false)
-
-  Random.seed!(42)
-  ps,st = Lux.setup(Random.default_rng(),chain) |> XDEV
-  train_state = Lux.Training.TrainState(chain,ps,st,strategy.optimiser.opt)
-
+function train_autodecoder!(train_state,dataloader,strategy)
+  lr_scheduler = get_scheduler(strategy)
+  logger = get_logger(strategy)
   to_device_batch((xb,yb)) = (xb |> XDEV,yb |> XDEV)
-  train_model!(
-    train_state,dataloader,strategy.optimiser.lr_scheduler,to_device_batch;logger=strategy.trainlog
-  )
+  train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger)
 end
 
-function TrainedNeuralNetwork(strategy::NeuralStrategy{<:AutoDecoder},::AbstractRealisation,coeff)
-  X = Float32.(_get_data(coeff))
-  nin = size(X,1)
-  n_train = size(X,2)
-
-  hidden = strategy.model.hidden_layers[1:end-1]
-  latent_dim = last(strategy.model.hidden_layers)
-  decoder = build_lux_chain((latent_dim,reverse(hidden)...,nin),strategy.model.activation)
-
-  Random.seed!(42)
-  Z0 = randn(Float32,latent_dim,n_train) .* 0.01f0
-  chain = Lux.Chain(LatentCodeLayer(Z0),decoder)
-
-  # Joint decoder + latent-code optimisation is inherently full-batch: every
-  # column of the latent-code parameter must be updated on every step.
-  dataloader = MLUtils.DataLoader((X,X);batchsize=n_train,shuffle=false,partial=false)
-
-  ps,st = Lux.setup(Random.default_rng(),chain) |> XDEV
-  train_state = Lux.Training.TrainState(chain,ps,st,strategy.optimiser.opt)
-
-  to_device_batch((xb,yb)) = (xb |> XDEV,yb |> XDEV)
-  train_model!(
-    train_state,dataloader,strategy.optimiser.lr_scheduler,to_device_batch;logger=strategy.trainlog
-  )
-end
-
-function TrainedNeuralNetwork(strategy::NeuralStrategy{<:VariationalAutoEncoder},::AbstractRealisation,coeff)
-  X = Float32.(_get_data(coeff))
-  nin = size(X,1)
-  n_samples = size(X,2)
-
-  hidden = strategy.model.hidden_layers[1:end-1]
-  latent_dim = last(strategy.model.hidden_layers)
-  encoder = build_lux_chain((nin,hidden...,2*latent_dim),strategy.model.activation)
-  decoder = build_lux_chain((latent_dim,reverse(hidden)...,nin),strategy.model.activation)
-  vae = VAELayer(encoder,decoder,latent_dim)
-
-  bs = resolve_batch_size(strategy.batch_size,n_samples)
-  dataloader = MLUtils.DataLoader(X;batchsize=bs,shuffle=true,partial=false)
-
-  Random.seed!(42)
-  ps,st = Lux.setup(Random.default_rng(),vae)
-  train_state = Lux.Training.TrainState(vae,ps,st,strategy.optimiser.opt)
-
+function train_vae!(train_state,dataloader,strategy)
+  lr_scheduler = get_scheduler(strategy)
+  logger = get_logger(strategy)
   β = strategy.model.β
   function vae_loss(model::VAELayer,ps,st,x)
     n_h = size(x,1)
@@ -122,17 +41,8 @@ function TrainedNeuralNetwork(strategy::NeuralStrategy{<:VariationalAutoEncoder}
     kl = -sum(1 .+ log_var .- μ.^2 .- exp.(log_var))/(2*size(x,2))
     return recon + β*kl,st,(;)
   end
-
-  ps_trained,st_trained = train_vae!(
-    train_state,dataloader,strategy.optimiser.lr_scheduler,vae_loss;logger=strategy.trainlog
-  )
-
-  TrainedVAE(
-    encoder,decoder,
-    ps_trained.encoder,Lux.testmode(st_trained.encoder),
-    ps_trained.decoder,Lux.testmode(st_trained.decoder),
-    latent_dim
-  )
+  to_device_batch(xb) = xb |> XDEV
+  train_model!(train_state,dataloader,lr_scheduler,to_device_batch;loss=vae_loss,logger)
 end
 
 # Generic Dispatch (Steady)
@@ -319,6 +229,217 @@ function train(
   trained = train_nomad!(train_state,dataloader,strategy)
 
   return trained,stats
+end
+
+function train(
+  red::AutoEncoderReduction,
+  feop::ParamOperator,
+  s::AbstractSnapshots
+  )
+
+  strategy = get_strategy(red)
+
+  # Data extraction
+  data, = get_formatted_data(Float32,s)
+  n_samples = size(data,2)
+
+  rng = Random.default_rng()
+  Random.seed!(rng,42)
+
+  model = build_model(strategy.model,size(data,1))
+  opt = get_optimiser(strategy)
+  ps,st = Lux.setup(rng,model) |> XDEV
+  train_state = Lux.Training.TrainState(model,ps,st,opt)
+
+  bs = resolve_batch_size(strategy,n_samples)
+  dataloader = MLUtils.DataLoader((data,data);batchsize=bs,shuffle=true,partial=false)
+
+  trained = train_autoencoder!(train_state,dataloader,strategy)
+
+  return trained,nothing
+end
+
+function train(
+  red::AutoEncoderReduction,
+  feop::ParamOperator,
+  s::AbstractSnapshots,
+  pretrained_op::NeuralOperator;
+  update_stats::Bool=false
+  )
+
+  strategy = get_strategy(red)
+
+  # Data extraction
+  data, = get_formatted_data(Float32,s)
+  n_samples = size(data,2)
+
+  # Pretrained model
+  model = pretrained_op.model.chain
+  opt = get_optimiser(strategy)
+  ps = pretrained_op.model.parameters |> XDEV
+  st = pretrained_op.model.states |> XDEV
+  train_state = Lux.Training.TrainState(model,ps,st,opt)
+
+  bs = resolve_batch_size(strategy,n_samples)
+  dataloader = MLUtils.DataLoader((data,data);batchsize=bs,shuffle=true,partial=false)
+
+  trained = train_autoencoder!(train_state,dataloader,strategy)
+
+  return trained,nothing
+end
+
+function train(
+  red::AutoDecoderReduction,
+  feop::ParamOperator,
+  s::AbstractSnapshots
+  )
+
+  strategy = get_strategy(red)
+
+  # Data extraction
+  data, = get_formatted_data(Float32,s)
+  nin,n_train = size(data,1),size(data,2)
+
+  rng = Random.default_rng()
+  Random.seed!(rng,42)
+
+  model = build_model(strategy.model,nin,n_train)
+  opt = get_optimiser(strategy)
+  ps,st = Lux.setup(rng,model) |> XDEV
+  train_state = Lux.Training.TrainState(model,ps,st,opt)
+
+  # Joint decoder + latent-code optimisation is inherently full-batch: every
+  # column of the latent-code parameter must be updated on every step.
+  dataloader = MLUtils.DataLoader((data,data);batchsize=n_train,shuffle=false,partial=false)
+
+  trained = train_autodecoder!(train_state,dataloader,strategy)
+
+  return trained,nothing
+end
+
+function train(
+  red::AutoDecoderReduction,
+  feop::ParamOperator,
+  s::AbstractSnapshots,
+  pretrained_op::NeuralOperator;
+  update_stats::Bool=false
+  )
+
+  strategy = get_strategy(red)
+
+  # Data extraction
+  data, = get_formatted_data(Float32,s)
+  n_train = size(data,2)
+
+  # Latent codes are optimised per training sample, so they can't be inherited across a
+  # different sample set: fine-tuning keeps the pretrained decoder weights but fits fresh
+  # latent codes for the new snapshots.
+  decoder = pretrained_op.model.chain.layers.layer_2
+  latent_dim = size(pretrained_op.model.parameters.layer_1.codes,1)
+
+  rng = Random.default_rng()
+  Random.seed!(rng,42)
+  Z0 = randn(Float32,latent_dim,n_train) .* 0.01f0
+  model = Lux.Chain(LatentCodeLayer(Z0),decoder)
+
+  ps,st = Lux.setup(rng,model)
+  ps = (layer_1=ps.layer_1,layer_2=pretrained_op.model.parameters.layer_2) |> XDEV
+  st = (layer_1=st.layer_1,layer_2=pretrained_op.model.states.layer_2) |> XDEV
+  opt = get_optimiser(strategy)
+  train_state = Lux.Training.TrainState(model,ps,st,opt)
+
+  dataloader = MLUtils.DataLoader((data,data);batchsize=n_train,shuffle=false,partial=false)
+
+  trained = train_autodecoder!(train_state,dataloader,strategy)
+
+  return trained,nothing
+end
+
+function train(
+  red::VAEReduction,
+  feop::ParamOperator,
+  s::AbstractSnapshots
+  )
+
+  strategy = get_strategy(red)
+
+  # Data extraction
+  data, = get_formatted_data(Float32,s)
+  n_samples = size(data,2)
+
+  rng = Random.default_rng()
+  Random.seed!(rng,42)
+
+  model = build_model(strategy.model,size(data,1))
+  opt = get_optimiser(strategy)
+  ps,st = Lux.setup(rng,model) |> XDEV
+  train_state = Lux.Training.TrainState(model,ps,st,opt)
+
+  bs = resolve_batch_size(strategy,n_samples)
+  dataloader = MLUtils.DataLoader(data;batchsize=bs,shuffle=true,partial=false)
+
+  trained = train_vae!(train_state,dataloader,strategy)
+
+  return trained,nothing
+end
+
+function train(
+  red::VAEReduction,
+  feop::ParamOperator,
+  s::AbstractSnapshots,
+  pretrained_op::NeuralOperator;
+  update_stats::Bool=false
+  )
+
+  strategy = get_strategy(red)
+
+  # Data extraction
+  data, = get_formatted_data(Float32,s)
+  n_samples = size(data,2)
+
+  # Pretrained model
+  model = pretrained_op.model.chain
+  opt = get_optimiser(strategy)
+  ps = pretrained_op.model.parameters |> XDEV
+  st = pretrained_op.model.states |> XDEV
+  train_state = Lux.Training.TrainState(model,ps,st,opt)
+
+  bs = resolve_batch_size(strategy,n_samples)
+  dataloader = MLUtils.DataLoader(data;batchsize=bs,shuffle=true,partial=false)
+
+  trained = train_vae!(train_state,dataloader,strategy)
+
+  return trained,nothing
+end
+
+"""
+    train_neural_coefficient(strategy::NeuralStrategy,r::AbstractRealisation,coeff) -> NeuralNetwork
+
+Builds and trains a [`NeuralNetwork`](@ref) from `strategy.model`'s recipe and
+`(r,coeff)` data, through the same Lux/Reactant/Enzyme pipeline used for DeepONet/NOMAD.
+For a [`MultiLayerPerceptron`](@ref), the input/output dimensions are inferred from
+`r`/`coeff` and appended to `strategy.model.hidden_layers`; for an [`AutoEncoder`](@ref),
+`r` is ignored and the network is trained to reconstruct `coeff`.
+"""
+function train_neural_coefficient(strategy::NeuralStrategy{<:MultiLayerPerceptron},r::AbstractRealisation,coeff)
+  x = Float32.(matrix_of_params(r))
+  y = Float32.(_get_data(coeff))
+  nin,nout = size(x,1),size(y,1)
+  n_samples = size(x,2)
+
+  chain = build_lux_chain((nin,strategy.model.hidden_layers...,nout),strategy.model.activation)
+
+  bs = resolve_batch_size(strategy.batch_size,n_samples)
+  dataloader = MLUtils.DataLoader((x,y);batchsize=bs,shuffle=true,partial=false)
+
+  Random.seed!(42)
+  ps,st = Lux.setup(Random.default_rng(),chain) |> XDEV
+  train_state = Lux.Training.TrainState(chain,ps,st,strategy.optimiser.opt)
+
+  to_device_batch((xb,yb)) = (xb |> XDEV,yb |> XDEV)
+  train_model!(
+    train_state,dataloader,strategy.optimiser.lr_scheduler,to_device_batch;logger=strategy.trainlog
+  )
 end
 
 # utils

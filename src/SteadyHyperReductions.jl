@@ -64,7 +64,7 @@ function RBSteady.HRProjection(
   b = GalerkinProjectable(s)
   y = galerkin_projection(test,b)
   ϕ = get_basis(y)
-  model = TrainedNeuralNetwork(get_strategy(red),r,ϕ)
+  model = train_neural_coefficient(get_strategy(red),r,ϕ)
   return NNOperator(model,test)
 end
 
@@ -80,7 +80,7 @@ function RBSteady.HRProjection(
   A = GalerkinProjectable(s)
   y = galerkin_projection(test,A,trial)
   ϕ = permutedims(get_basis(y),(1,3,2))
-  model = TrainedNeuralNetwork(get_strategy(red),r,ϕ)
+  model = train_neural_coefficient(get_strategy(red),r,ϕ)
   return NNOperator(model,trial,test)
 end
 

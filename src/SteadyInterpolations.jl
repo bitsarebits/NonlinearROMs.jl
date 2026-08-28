@@ -23,6 +23,6 @@ function RBSteady.Interpolation(
   red_data = RBSteady.get_at_domain(s,inds)
   coeff = parameterise(allocate_in_domain(a),r)
   ldiv!(coeff,factor,red_data)
-  model = TrainedNeuralNetwork(get_strategy(red),r,coeff)
+  model = train_neural_coefficient(get_strategy(red),r,coeff)
   NNInterpolation(model)
 end

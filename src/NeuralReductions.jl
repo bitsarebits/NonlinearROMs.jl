@@ -169,7 +169,33 @@ reduction = NOMADReduction(model=NOMAD(2,3;width=32,depth=2), epochs=1000)
 """
 const NOMADReduction{M<:NOMAD} = NeuralReduction{M}
 
-for (f,m) in ((:DeepONetReduction,:DeepONet),(:NOMADReduction,:NOMAD))
+"""
+    const AutoEncoderReduction{M<:AutoEncoder} = NeuralReduction{M}
+    const AutoDecoderReduction{M<:AutoDecoder} = NeuralReduction{M}
+    const VAEReduction{M<:VariationalAutoEncoder} = NeuralReduction{M}
+
+Reduction wrappers for the reconstruction-based architectures, analogous to
+[`DeepONetReduction`](@ref)/[`NOMADReduction`](@ref): they instruct
+[`reduced_operator`](@ref) to train an [`AutoEncoder`](@ref)/[`AutoDecoder`](@ref)/
+[`VariationalAutoEncoder`](@ref) on the snapshot data itself (no parameters/coordinates
+involved), producing a [`NeuralOperator`](@ref) with `metadata === nothing`.
+
+# Constructors
+Same pattern as `DeepONetReduction`/`NOMADReduction`: wrap an explicit `NeuralStrategy`,
+or build one from `model=...`/kwargs directly, e.g.
+`AutoEncoderReduction(model=AutoEncoder(width=32,depth=2), epochs=1000)`.
+"""
+const AutoEncoderReduction{M<:AutoEncoder} = NeuralReduction{M}
+const AutoDecoderReduction{M<:AutoDecoder} = NeuralReduction{M}
+const VAEReduction{M<:VariationalAutoEncoder} = NeuralReduction{M}
+
+for (f,m) in (
+    (:DeepONetReduction,:DeepONet),
+    (:NOMADReduction,:NOMAD),
+    (:AutoEncoderReduction,:AutoEncoder),
+    (:AutoDecoderReduction,:AutoDecoder),
+    (:VAEReduction,:VariationalAutoEncoder)
+  )
   @eval begin
     $f(s::NeuralStrategy{<:$m}) = NeuralReduction(s)
 

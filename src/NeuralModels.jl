@@ -106,7 +106,7 @@ end
 Recipe for a dense feed-forward network used for scalar/vector regression (e.g.
 predicting EIM/reduced-basis coefficients from parameter values). `hidden_layers`
 holds only the hidden widths (e.g. `(64,64)`); the input/output dimensions are
-inferred from the training data at [`TrainedNeuralNetwork`](@ref) call time, since
+inferred from the training data at [`train_neural_coefficient`](@ref) call time, since
 one `MultiLayerPerceptron` recipe is typically reused (via [`NeuralStrategy`](@ref))
 to train many differently-shaped networks (one per triangulation/reduced quantity).
 """
@@ -262,4 +262,32 @@ function build_model(model::NOMAD)
   approximator_net = build_lux_chain(model.approximator_layers,model.activation)
   decoder_net = build_lux_chain(model.decoder_layers,model.activation)
   LuxNOMAD(approximator_net,decoder_net)
+end
+
+# AutoEncoder/AutoDecoder/VariationalAutoEncoder only store hidden widths (their input
+# dimension depends on the snapshot data, unlike DeepONet/NOMAD's branch/trunk sizes which
+# are fixed at construction time), so their `build_model` needs `nin` from the caller.
+
+function build_model(model::AutoEncoder,nin::Int)
+  hidden = model.hidden_layers[1:end-1]
+  latent_dim = last(model.hidden_layers)
+  encoder = build_lux_chain((nin,hidden...,latent_dim),model.activation)
+  decoder = build_lux_chain((latent_dim,reverse(hidden)...,nin),model.activation)
+  Lux.Chain(encoder,decoder)
+end
+
+function build_model(model::AutoDecoder,nin::Int,n_train::Int)
+  hidden = model.hidden_layers[1:end-1]
+  latent_dim = last(model.hidden_layers)
+  decoder = build_lux_chain((latent_dim,reverse(hidden)...,nin),model.activation)
+  Z0 = randn(Float32,latent_dim,n_train) .* 0.01f0
+  Lux.Chain(LatentCodeLayer(Z0),decoder)
+end
+
+function build_model(model::VariationalAutoEncoder,nin::Int)
+  hidden = model.hidden_layers[1:end-1]
+  latent_dim = last(model.hidden_layers)
+  encoder = build_lux_chain((nin,hidden...,2*latent_dim),model.activation)
+  decoder = build_lux_chain((latent_dim,reverse(hidden)...,nin),model.activation)
+  VAELayer(encoder,decoder,latent_dim)
 end

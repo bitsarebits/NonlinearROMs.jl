@@ -2,54 +2,54 @@ const CDEV = Lux.cpu_device()
 const XDEV = Lux.reactant_device(;force=true)
 
 """
-    struct TrainedModel{A,B,C} <: NeuralNetwork
+    struct TrainedNeuralModel{A,B,C} <: NeuralNetwork
       chain::A
       parameters::B
       states::C
     end
 
 A trained Lux `chain` bundled with its optimised parameters/states, evaluable
-as `(a::TrainedModel)(x::AbstractMatrix) -> AbstractMatrix` via the standard
-`Arrays.evaluate!`/`return_cache` interface. Returned by [`TrainedNeuralNetwork`](@ref)
+as `(a::TrainedNeuralModel)(x::AbstractMatrix) -> AbstractMatrix` via the standard
+`Arrays.evaluate!`/`return_cache` interface. Returned by [`train_neural_coefficient`](@ref)
 for [`MultiLayerPerceptron`](@ref) strategies.
 """
-struct TrainedModel{A,B,C} <: NeuralNetwork
+struct TrainedNeuralModel{A,B,C} <: NeuralNetwork
   chain::A
   parameters::B
   states::C
 end
 
-function TrainedModel(train_state::Lux.Training.TrainState)
+function TrainedNeuralModel(train_state::Lux.Training.TrainState)
   parameters = train_state.parameters |> CDEV
   states = Lux.testmode(train_state.states) |> CDEV
-  TrainedModel(train_state.model,parameters,states)
+  TrainedNeuralModel(train_state.model,parameters,states)
 end
 
-function Arrays.evaluate!(cache,a::TrainedModel,x::AbstractMatrix)
+function Arrays.evaluate!(cache,a::TrainedNeuralModel,x::AbstractMatrix)
   first(a.chain(Float32.(x),a.parameters,a.states))
 end
 
 """
-    (m::TrainedModel)(inputs) -> AbstractArray
-    (m::TrainedModel)(inputs,metadata) -> AbstractArray
+    (m::TrainedNeuralModel)(inputs) -> AbstractArray
+    (m::TrainedNeuralModel)(inputs,metadata) -> AbstractArray
 
 Applies `m` to `inputs` (a `(params,coords)`/`(pin,xin)` tuple for DeepONet/NOMAD, or
 a plain matrix). `metadata` optionally denormalises the output by `metadata.dmax`; it
 is a no-op when `metadata === nothing` (a `NeuralOperator` with no normalisation stats).
 """
-function (m::TrainedModel)(inputs)
+function (m::TrainedNeuralModel)(inputs)
   first(m.chain(inputs,m.parameters,m.states))
 end
 
-(m::TrainedModel)(inputs,metadata::Nothing) = m(inputs)
+(m::TrainedNeuralModel)(inputs,metadata::Nothing) = m(inputs)
 
-function (m::TrainedModel)(inputs,metadata::NormStats)
+function (m::TrainedNeuralModel)(inputs,metadata::NormStats)
   pred = m(inputs)
   pred .*= metadata.dmax
   return pred
 end
 
-const TrainedAutoEncoder = TrainedModel{<:AutoEncoder}
+const TrainedAutoEncoder = TrainedNeuralModel{<:AutoEncoder}
 
 function Arrays.evaluate!(cache,a::TrainedAutoEncoder,z::AbstractMatrix)
   decode(a,z)
@@ -63,10 +63,10 @@ function decode(a::TrainedAutoEncoder,Z::AbstractMatrix)
   first(a.chain.layers.layer_2(Float32.(Z),a.parameters.layer_2,a.states.layer_2))
 end
 
-const TrainedAutoDecoder = TrainedModel{<:AutoDecoder}
+const TrainedAutoDecoder = TrainedNeuralModel{<:AutoDecoder}
 
 function Arrays.evaluate!(cache,a::TrainedAutoDecoder,z::AbstractMatrix)
-  first(a.decoder(Float32.(z),a.parameters,a.states))
+  first(a.chain.layers.layer_2(Float32.(z),a.parameters.layer_2,a.states.layer_2))
 end
 
 get_latent_codes(a::TrainedAutoDecoder) = a.parameters.layer_1.codes
@@ -86,7 +86,7 @@ function infer_latent(a::TrainedAutoDecoder,x_target::AbstractVector,strategy::N
   opt_state = Optimisers.setup(strategy.optimiser.opt,z)
   for _ in 1:strategy.epochs
     grad = ForwardDiff.gradient(z) do z_
-      X̂ = first(a.decoder(reshape(z_,:,1),a.parameters,a.states))
+      X̂ = first(a.chain.layers.layer_2(reshape(z_,:,1),a.parameters.layer_2,a.states.layer_2))
       sum(abs2,X̂ .- X_t)/length(X_t)
     end
     opt_state,z = Optimisers.update!(opt_state,z,grad)
@@ -137,15 +137,17 @@ function decode(a::TrainedVAE,Z::AbstractMatrix)
 end
 
 """
-    train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger::TrainingLog)
+    train_model!(train_state,dataloader,lr_scheduler,to_device_batch;loss=Lux.MSELoss(),logger::TrainingLog)
 
-Generic Lux/Reactant/Enzyme training loop shared by DeepONet and NOMAD. `to_device_batch`
-maps one raw batch yielded by `dataloader` to the `(inputs,target)` pair (already moved to
-`XDEV`) expected by `Lux.Training.single_train_step!`; this is the only piece that differs
-between the two architectures (DeepONet pairs each batch with a fixed set of trunk query
-points, NOMAD's coordinates are already part of the per-row batch).
+Generic Lux/Reactant/Enzyme training loop shared by every architecture in this package.
+`to_device_batch` maps one raw batch yielded by `dataloader` to whatever `loss` expects
+as its data argument (already moved to `XDEV`) — DeepONet pairs each batch with a fixed
+set of trunk query points, NOMAD's coordinates are already part of the per-row batch,
+and a plain reconstruction network (AutoEncoder/AutoDecoder) just needs `(x,x)`. `loss`
+defaults to `Lux.MSELoss()`; pass a custom `(model,ps,st,data) -> (loss,st,stats)`
+function for anything else (e.g. a VAE's reconstruction+KL loss).
 """
-function train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger::TrainingLog)
+function train_model!(train_state,dataloader,lr_scheduler,to_device_batch;loss=Lux.MSELoss(),logger::TrainingLog)
   init!(logger)
 
   Reactant.with_config(;dot_general_precision=Reactant.PrecisionConfig.HIGH) do
@@ -157,7 +159,7 @@ function train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger
 
         _,loss_val,_,train_state = Lux.Training.single_train_step!(
           Lux.AutoEnzyme(),
-          Lux.MSELoss(),
+          loss,
           batch_dev,
           train_state;
           return_gradients=Val(false)
@@ -173,32 +175,5 @@ function train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger
   end
 
   finalize!(logger)
-  return TrainedModel(train_state)
-end
-
-function train_vae!(train_state,dataloader,lr_scheduler,loss_fn;logger::TrainingLog)
-  init!(logger)
-
-  for epoch in 1:logger.max_epochs
-    local current_loss = 0.0f0
-
-    for x_batch in dataloader
-      _,loss_val,_,train_state = Lux.Training.single_train_step!(
-        Lux.AutoEnzyme(),
-        loss_fn,
-        x_batch,
-        train_state;
-        return_gradients=Val(false)
-      )
-      current_loss += Float32(loss_val)
-    end
-    current_loss /= length(dataloader)
-
-    step_scheduler!(lr_scheduler,train_state.optimizer_state,epoch,current_loss;verbose=logger.verbose)
-
-    update!(logger,epoch,current_loss)
-  end
-
-  finalize!(logger)
-  return train_state.parameters,train_state.states
+  return TrainedNeuralModel(train_state)
 end
