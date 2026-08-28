@@ -9,7 +9,7 @@ function RBSteady.HRProjection(
   b = GalerkinProjectable(s)
   y = galerkin_projection(test,b)
   ϕ = get_basis(y)
-  model = TrainedNeuralNetwork(get_strategy(red),r,ϕ)
+  model = train_neural_coefficient(get_strategy(red),r,ϕ)
   return NNOperator(model,test)
 end
 
@@ -25,7 +25,7 @@ function RBSteady.HRProjection(
   A = GalerkinProjectable(s)
   y = galerkin_projection(test,A,trial,get_time_combination(red))
   ϕ = permutedims(get_basis(y),(1,3,2))
-  model = TrainedNeuralNetwork(get_strategy(red),r,ϕ)
+  model = train_neural_coefficient(get_strategy(red),r,ϕ)
   return NNOperator(model,trial,test)
 end
 
@@ -36,9 +36,9 @@ function RBSteady.HRProjection(
   test::RBSpace
   )
 
-  basis = projection(RBSteady.get_reduction(red),s)
+  basis = projection(get_reduction(red),s)
   proj_basis = project(test,basis)
-  interp = RBSteady.Interpolation(red,basis,s)
+  interp = Interpolation(red,basis,s)
   return HRProjection(proj_basis,red,interp)
 end
 
@@ -50,9 +50,9 @@ function RBSteady.HRProjection(
   test::RBSpace
   )
 
-  basis = projection(RBSteady.get_reduction(red),s)
+  basis = projection(get_reduction(red),s)
   proj_basis = project(test,basis,trial,get_time_combination(red))
-  interp = RBSteady.Interpolation(red,basis,s)
+  interp = Interpolation(red,basis,s)
   return HRProjection(proj_basis,red,interp)
 end
 

@@ -10,7 +10,7 @@ function RBSteady.Interpolation(
   red_data = RBTransient.get_at_kron_domain(s,inds...)
   coeff = parameterise(allocate_in_domain(a),r)
   ldiv!(coeff,factor,red_data)
-  model = TrainedNeuralNetwork(get_strategy(red),r,coeff)
+  model = train_neural_coefficient(get_strategy(red),r,coeff)
   NNInterpolation(model)
 end
 
@@ -26,6 +26,6 @@ function RBSteady.Interpolation(
   red_data = RBTransient.get_at_seq_domain(s,inds...)
   coeff = parameterise(allocate_in_domain(a),r)
   ldiv!(coeff,factor,red_data)
-  model = TrainedNeuralNetwork(get_strategy(red),r,coeff)
+  model = train_neural_coefficient(get_strategy(red),r,coeff)
   NNInterpolation(model)
 end

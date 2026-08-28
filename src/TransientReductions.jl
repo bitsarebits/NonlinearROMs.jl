@@ -10,25 +10,15 @@ Carry the `combination::TimeCombination` from the ODE solver.
 struct HighDimNNOperatorReduction <: AbstractHighDimNNHyperReduction{NoReductionStyle}
   combination::TimeCombination
   nparams::Int
-  strategy::NNStrategy
+  strategy::NeuralStrategy
 end
 
 function HighDimNNOperatorReduction(
   combination::TimeCombination,
   args...;
   nparams::Int=20,
-  type=MLPType(),
-  layers=(64,64),
-  lr=1e-3,
-  optimiser=Optimisers.Adam(lr),
-  loss=loss_mse,
-  epochs=1000,
-  weight_decay=0.0,
-  batch_size=0,
-  lr_schedule=nothing,
-  patience=0,
-  val_fraction=0.1,
-  strategy=NNStrategy(;type,layers,lr,optimiser,loss,epochs,weight_decay,batch_size,lr_schedule,patience,val_fraction),
+  model::NeuralNetwork=MultiLayerPerceptron(),
+  strategy::NeuralStrategy=NeuralStrategy(model),
   kwargs...
   )
 
@@ -49,24 +39,14 @@ basis-projection stage.
 struct HighDimNNHyperReduction{A} <: AbstractHighDimNNHyperReduction{A}
   combination::TimeCombination
   reduction::Reduction{A,EuclideanNorm}
-  strategy::NNStrategy
+  strategy::NeuralStrategy
 end
 
 function HighDimNNHyperReduction(
   combination::TimeCombination,
   args...;
-  type=MLPType(),
-  layers=(64,64),
-  lr=1e-3,
-  optimiser=Optimisers.Adam(lr),
-  loss=loss_mse,
-  epochs=1000,
-  weight_decay=0.0,
-  batch_size=0,
-  lr_schedule=nothing,
-  patience=0,
-  val_fraction=0.1,
-  strategy=NNStrategy(;type,layers,lr,optimiser,loss,epochs,weight_decay,batch_size,lr_schedule,patience,val_fraction),
+  model::NeuralNetwork=MultiLayerPerceptron(),
+  strategy::NeuralStrategy=NeuralStrategy(model),
   kwargs...
   )
 

@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'CONTRIBUTING.md'
+      - 'CODE_OF_CONDUCT.md'
+      - 'LICENSE.md'
+      - 'README.md'
+      - 'NEWS.md'
+      - 'ADMINISTRATORS'
+      - 'benchmark/**'
+      - 'docs/**'
+  pull_request:
+    paths-ignore:
+      - 'CONTRIBUTING.md'
+      - 'CODE_OF_CONDUCT.md'
+      - 'LICENSE.md'
+      - 'README.md'
+      - 'NEWS.md'
+      - 'ADMINISTRATORS'
+      - 'benchmark/**'
+      - 'docs/**'
+  workflow_dispatch: # Allow manual triggering of the workflow from the Actions tab
+
+# Cancel redundant CI tests automatically
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test: # Main CI tests
+    name: Tests ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
+    runs-on: ${{ matrix.os }}
+    env:
+      DO_COVERAGE: ${{ matrix.version == '1.10' && matrix.os == 'ubuntu-latest' && matrix.arch == 'x64' }}
+    strategy:
+      fail-fast: false
+      matrix: # Main tests for linux
+        version:
+          - '1.10'
+          - '1.11'
+          - '1.12'
+        os:
+          - ubuntu-latest
+        arch:
+          - x64
+        include: # Test macos/windows/x86 on latest LTS
+          - version: '1.10'
+            os: macos-latest
+            arch: aarch64
+          - version: '1.10'
+            os: windows-latest
+            arch: x64
+          - version: '1.10'
+            os: ubuntu-latest
+            arch: x86
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: ${{ matrix.version }}
+          arch: ${{ matrix.arch }}
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1
+        with:
+          coverage: ${{ env.DO_COVERAGE }}
+
+      - uses: julia-actions/julia-processcoverage@v1
+        if: ${{ env.DO_COVERAGE }}
+      - uses: codecov/codecov-action@v6
+        if: ${{ env.DO_COVERAGE }}
+        with:
+          verbose: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: tests
+

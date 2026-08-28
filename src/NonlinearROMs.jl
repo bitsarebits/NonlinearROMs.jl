@@ -7,10 +7,10 @@ components for [`GridapROMs.jl`](https://github.com/gridap/GridapROMs.jl).
 This package was extracted out of `GridapROMs.RBSteady`/`GridapROMs.RBTransient`
 into its own repository, and plugs back into them via multiple dispatch:
 
-- **Neural network models** (`NeuralNetworks.jl`) — `MultiLayerPerceptron`,
-  `GenericNeuralNetwork`, `AutoEncoder`, `VariationalAutoEncoder`, `AutoDecoder`,
-  `TrainedNeuralNetwork`; a minimal ForwardDiff-based training loop with
-  mini-batching, LR scheduling, and early stopping, configured via `NNStrategy`.
+- **Neural network models** (`NeuralModels.jl`) — `DeepONet`, `NOMAD`,
+  `MultiLayerPerceptron`, `AutoEncoder`, `VariationalAutoEncoder`, `AutoDecoder`,
+  `GenericNeuralNetwork`; all trained through the same Lux/Reactant/Enzyme
+  pipeline (`NeuralStrategy`, `train_model!`, `train_neural_coefficient`).
 
 - **Steady hyper-reduction** — `NNOperatorReduction` (operator regression),
   `NNHyperReduction` (NN-predicted EIM coefficients), `NNOperator`,
@@ -31,46 +31,118 @@ module NonlinearROMs
 using LinearAlgebra
 using Random
 using SparseArrays
+using Statistics
+using FillArrays
 using ForwardDiff
 using Optimisers
+using Enzyme
+using Lux
+using MLUtils
+using Reactant
 
 using Gridap
 using Gridap.Algebra
 using Gridap.Arrays
 using Gridap.CellData
 using Gridap.FESpaces
+using Gridap.Geometry
 using Gridap.Helpers
+using Gridap.Polynomials
+using Gridap.ReferenceFEs
 
 using GridapROMs
+using GridapROMs.DofMaps
 using GridapROMs.ParamDataStructures
 using GridapROMs.ParamODEs
+using GridapROMs.ParamSteady
 using GridapROMs.RBSteady
 using GridapROMs.RBTransient
 using GridapROMs.Utils
 
-export NNType
-export GenericNNType
-export MLPType
-export AutoEncoderType
-export VariationalAutoEncoderType
-export AutoDecoderType
-export NNStrategy
+import GridapROMs.RBSteady:
+  GlobalRBSolver,GlobalContext,get_reduction,get_state_reduction,get_interpolation,
+  allocate_coefficient,allocate_hyper_reduction,allocate_hypred_cache
+
+export TrainingLog
+export ZscoreStats
+export normalise!
+export CoordinateSnapshots
+export get_coords
+export get_formatted_data
+include("Utils.jl")
+
 export NeuralNetwork
 export GenericNeuralNetwork
+include("NeuralNetworks.jl")
+
+export LRScheduler
+export CosineAnnealing
+export ReduceLROnPlateau
+export step_scheduler!
+export get_lr
+include("LRSchedulers.jl")
+
+export Sampler
+export MultiSampler
+export sample
+export get_ids
+export get_param_ids
+export get_time_ids
+include("Samplers.jl")
+
+export LatentCodeLayer
+export VAELayer
+include("NeuralLayers.jl")
+
+export DeepONet
+export NOMAD
 export MultiLayerPerceptron
-export TrainedNeuralNetwork
 export AutoEncoder
 export VariationalAutoEncoder
 export AutoDecoder
-export train!
-export loss_mse
-export loss_mae
+export build_model
+include("NeuralModels.jl")
+
+export NeuralOptimiser
+export NeuralStrategy
+export NeuralReduction
+export DeepONetReduction
+export NOMADReduction
+export AutoEncoderReduction
+export AutoDecoderReduction
+export VAEReduction
+include("NeuralReductions.jl")
+
+export TrainedNeuralModel
+export TrainedAutoEncoder
+export TrainedAutoDecoder
+export train_model!
+export infer_latent
 export encode
 export decode
-export infer_latent
-include("NeuralNetworks.jl")
+export XDEV
+export CDEV
+include("NeuralModelsTraining.jl")
 
-export get_strategy
+export NeuralSolver
+export NeuralOperator
+include("NeuralSolvers.jl")
+
+export train
+export train_deeponet!
+export train_nomad!
+export train_autoencoder!
+export train_autodecoder!
+export train_vae!
+export train_neural_coefficient
+export TrainedVAE
+export resolve_batch_size
+include("NeuralTraining.jl")
+
+include("TransientNeuralTraining.jl")
+
+include("TransientNeuralSolver.jl")
+
 export NNOperatorReduction
 export NNHyperReduction
 include("SteadyReductions.jl")
