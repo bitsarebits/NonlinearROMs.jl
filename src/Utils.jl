@@ -136,37 +136,45 @@ directly interpolating the coordinate field onto `V`, it is valid for any
 result into a `(D_phys,N_dofs)` `Matrix{Float32}`.
 """
 function get_coords(V::SingleFieldFESpace)
-  order = get_polynomial_orders(V)
+  orders = get_polynomial_orders(V)
   trian = get_triangulation(V)
   model = get_background_model(trian)
-  get_coords(model,order)
+  cell_dofs = get_cell_dof_ids(V)
+  nfree = num_free_dofs(V)
+  get_coords(model,cell_dofs,orders,nfree)
 end
 
-function get_coords(model::CartesianDiscreteModel{D},orders::NTuple{D,Int}) where D 
+function get_coords(
+  model::CartesianDiscreteModel{D},
+  cell_dofs::AbstractArray,
+  orders::NTuple{D,Int},
+  nfree::Int
+  ) where D
+
   desc = get_cartesian_descriptor(model)
   cells = CartesianIndices(desc.partition)
-  nodes = CartesianIndices(orders .* desc.partition .+ 1 .- desc.isperiodic)
-  coords = Array{Point{D,Float64}}(undef,size(nodes))
+  cell_ids = LinearIndices(desc.partition)
+  coords = Vector{Point{D,Float64}}(undef,nfree)
+  cache = array_cache(cell_dofs)
+
+  p = cubic_polytope(Val(D))
+  local_nodes = pnode_to_local_node(p,orders)
+
   for cell in cells
     first_new_node = orders .* (Tuple(cell) .- 1) .+ 1
     nodes_range = map(enumerate(first_new_node)) do (i,ni)
       ni:(ni+orders[i])
     end
+    celldofs = getindex!(cache,cell_dofs,cell_ids[cell])
     for inode in Iterators.product(nodes_range...)
-      _is_periodic_node(inode,nodes) && continue
-      coords[inode...] = Point(ntuple(d -> desc.origin[d] + (inode[d]-1)*desc.sizes[d],Val{D}()))
+      local_pos = CartesianIndex(inode .- first_new_node .+ 1)
+      local_node = local_nodes[local_pos]
+      dof = celldofs[local_node]
+      dof <= 0 && continue
+      coords[dof] = Point(ntuple(d -> desc.origin[d] + (inode[d]-1)*desc.sizes[d]/orders[d],Val{D}()))
     end
   end
   return coords
-end
-
-function _is_periodic_node(inode,nodes)
-  try
-    nodes[inode...]
-    return false
-  catch
-    return true
-  end
 end
 
 struct CoordinateSnapshots{T,N,Tc,Nc,A<:AbstractSnapshots{T,N},B<:AbstractArray{Tc,Nc}} <:AbstractSnapshots{T,N}
@@ -277,4 +285,21 @@ end
 
 function get_formatted_data(s)
   get_formatted_data(Float32,s)
+end
+
+# utils 
+
+cubic_polytope(::Val{d}) where d = @abstractmethod
+cubic_polytope(::Val{1}) = SEGMENT
+cubic_polytope(::Val{2}) = QUAD
+cubic_polytope(::Val{3}) = HEX
+
+function pnode_to_local_node(p::Polytope,orders)
+  _nodes, = Gridap.ReferenceFEs._compute_nodes(p,orders)
+  pnodes = Gridap.ReferenceFEs._coords_to_terms(_nodes,orders)
+  local_nodes = Array{Int}(undef,orders .+ 1)
+  for k in eachindex(pnodes)
+    local_nodes[pnodes[k]] = k
+  end
+  return local_nodes
 end
