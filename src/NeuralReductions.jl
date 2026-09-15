@@ -126,6 +126,14 @@ RBSteady.NormStyle(r::NeuralReduction) = EuclideanNorm()
 get_strategy(r::NeuralReduction) = r.strategy
 
 """
+    const KernelOperatorReduction{M<:AbstractKernelNeuralOperator} = NeuralReduction{M}
+
+A reduction wrapper for Kernel-based Neural Operators.
+It instructs the ROM solvers to use the Kernel Neural Operator pipeline (tensor formatting and iterative integration) during the offline and online phases.
+"""
+const KernelOperatorReduction{M<:AbstractKernelNeuralOperator} = NeuralReduction{M}
+
+"""
     const DeepONetReduction{M<:DeepONet} = NeuralReduction{M}
 
 A reduction wrapper for the Deep Operator Network (DeepONet) strategy.
@@ -194,7 +202,8 @@ for (f,m) in (
     (:NOMADReduction,:NOMAD),
     (:AutoEncoderReduction,:AutoEncoder),
     (:AutoDecoderReduction,:AutoDecoder),
-    (:VAEReduction,:VariationalAutoEncoder)
+    (:VAEReduction,:VariationalAutoEncoder),
+    (:KernelOperatorReduction,:AbstractKernelNeuralOperator)
   )
   @eval begin
     $f(s::NeuralStrategy{<:$m}) = NeuralReduction(s)

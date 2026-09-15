@@ -1,3 +1,116 @@
+function train_kernel_operator!(train_state,dataloader,strategy,n_nodes)
+    lr_scheduler = get_scheduler(strategy)
+    logger = get_logger(strategy)
+
+    # prepares the mini-batch for the neural network.
+    # x_batch is [Features_in, Nodes, Samples].
+    # y_batch is [N_dofs, Samples]. It gets reshaped to [Features_out, Nodes, Samples].
+    function to_device_batch((x_batch,y_batch))
+        n_samples = size(y_batch,2)
+        n_dofs = size(y_batch,1)
+
+        # Dynamically compute the number of physical variables
+        out_channels = n_dofs ÷ n_nodes
+
+        y_reshaped = reshape(y_batch,out_channels,n_nodes,n_samples)
+
+        return (x_batch |> XDEV,y_reshaped |> XDEV)
+    end
+
+    train_model!(train_state,dataloader,lr_scheduler,to_device_batch;logger)
+end
+
+function train(
+    red::KernelOperatorReduction,
+    feop::ParamOperator,
+    s::AbstractSnapshots
+)
+    strategy = get_strategy(red)
+
+    # Data extraction
+    sx = CoordinateSnapshots(s,get_test(feop))
+    target = sample(get_sampler(strategy),sx)
+    data,params,coords = get_formatted_data(Float32,target)
+
+    # Normalisation applied strictly before building the tensor
+    stats = NormStats(data,params,coords;normalise=true)
+    
+    # Build 3D Tensor for Kernel Operators
+    input_tensor = _build_kernel_inputs(params,coords)
+    n_samples = size(data,2)
+
+    # Model Building
+    rng = Random.default_rng()
+    Random.seed!(rng,42)
+
+    model = build_model(strategy)
+    opt = get_optimiser(strategy)
+    ps,st = Lux.setup(rng,model) |> XDEV
+    train_state = Lux.Training.TrainState(model,ps,st,opt)
+
+    # DataLoader
+    bs = resolve_batch_size(strategy,n_samples)
+    dataloader = MLUtils.DataLoader(
+        (input_tensor,data);
+        batchsize=bs,
+        shuffle=true,
+        partial=false
+    )
+
+    trained = train_kernel_operator!(train_state,dataloader,strategy)
+
+    return trained,stats
+end
+
+function train(
+    red::KernelOperatorReduction,
+    feop::ParamOperator,
+    s::AbstractSnapshots,
+    pretrained_op::NeuralOperator;
+    update_stats::Bool=false
+)
+    strategy = get_strategy(red)
+
+    # Data extraction
+    sx = CoordinateSnapshots(s,get_test(feop))
+    target = sample(get_sampler(strategy),sx)
+    data,params,coords = get_formatted_data(Float32,target)
+    n_samples = size(data,2)
+
+    # Normalisation
+    if update_stats
+        stats = NormStats(data,params,coords;normalise=true)
+    else
+        stats = pretrained_op.metadata
+        expected_param_in = length(stats.pscore.μ)
+        expected_coord_in = length(stats.xscore.μ)
+        @assert size(params,1) == expected_param_in "Parameter dimension mismatch: expected $expected_param_in, got $(size(params, 1))."
+        @assert size(coords,1) == expected_coord_in "Coordinate dimension mismatch: expected $expected_coord_in, got $(size(coords, 1))."
+        normalise!((data,params,coords),stats)
+    end
+
+    # Build 3D Tensor for Kernel Operators
+    input_tensor = _build_kernel_inputs(params,coords)
+
+    # Pretrained model setup
+    model = pretrained_op.model.chain
+    opt = get_optimiser(strategy)
+    ps = pretrained_op.model.parameters |> XDEV
+    st = pretrained_op.model.states |> XDEV
+    train_state = Lux.Training.TrainState(model,ps,st,opt)
+
+    bs = resolve_batch_size(strategy,n_samples)
+    dataloader = MLUtils.DataLoader(
+        (input_tensor,data);
+        batchsize=bs,
+        shuffle=true,
+        partial=false
+    )
+
+    trained = train_kernel_operator!(train_state,dataloader,strategy)
+
+    return trained,stats
+end
 
 function train_deeponet!(train_state,dataloader,x_data_dev,strategy)
   lr_scheduler = get_scheduler(strategy)

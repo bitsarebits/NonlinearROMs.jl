@@ -1,5 +1,21 @@
 """
-    struct DeepONet{F} <: NeuralNetwork
+    struct KernelNeuralOperator{K, F} <: AbstractKernelNeuralOperator
+
+Generic architecture for Kernel-based Neural Operators.
+It maps an input function to an output function through three main stages:
+1. Lifting (P): A local operator mapping input features to a higher-dimensional hidden representation.
+2. Iterative Kernel Integration: A sequence of `NeuralOperatorLayer`s representing the non-local processing.
+3. Projection (Q): A local operator mapping the final hidden representation to the target output dimension.
+"""
+struct KernelNeuralOperator{K,F} <: AbstractKernelNeuralOperator
+    lifting_layers::Tuple{Vararg{Int}}
+    kernel_configs::Tuple{Vararg{Any}}
+    projection_layers::Tuple{Vararg{Int}}
+    activation::F
+end
+
+"""
+    struct DeepONet{F} <: AbstractCoordinateBasedOperator
       branch_layers::Tuple{Vararg{Int}}
       trunk_layers::Tuple{Vararg{Int}}
       activation::F
@@ -27,7 +43,7 @@ model = DeepONet(
   )
 ```
 """
-struct DeepONet{F} <: NeuralNetwork
+struct DeepONet{F} <: AbstractCoordinateBasedOperator
   branch_layers::Tuple{Vararg{Int}}
   trunk_layers::Tuple{Vararg{Int}}
   activation::F
@@ -52,7 +68,7 @@ function DeepONet(
 end
 
 """
-    struct NOMAD{F} <: NeuralNetwork
+    struct NOMAD{F} <: AbstractCoordinateBasedOperator
       approximator_layers::Tuple{Vararg{Int}}
       decoder_layers::Tuple{Vararg{Int}}
       activation::F
@@ -73,7 +89,7 @@ model = NOMAD(
   )
 ```
 """
-struct NOMAD{F} <: NeuralNetwork
+struct NOMAD{F} <: AbstractCoordinateBasedOperator
   approximator_layers::Tuple{Vararg{Int}}
   decoder_layers::Tuple{Vararg{Int}}
   activation::F
@@ -98,7 +114,7 @@ function NOMAD(
 end
 
 """
-    struct MultiLayerPerceptron{F} <: NeuralNetwork
+    struct MultiLayerPerceptron{F} <: AbstractFiniteDimensionalNetwork
       hidden_layers::Tuple{Vararg{Int}}
       activation::F
     end
@@ -110,7 +126,7 @@ inferred from the training data at [`train_neural_coefficient`](@ref) call time,
 one `MultiLayerPerceptron` recipe is typically reused (via [`NeuralStrategy`](@ref))
 to train many differently-shaped networks (one per triangulation/reduced quantity).
 """
-struct MultiLayerPerceptron{F} <: NeuralNetwork
+struct MultiLayerPerceptron{F} <: AbstractFiniteDimensionalNetwork
   hidden_layers::Tuple{Vararg{Int}}
   activation::F
 end
@@ -126,7 +142,7 @@ function MultiLayerPerceptron(;
 end
 
 """
-    struct AutoEncoder{F} <: NeuralNetwork
+    struct AutoEncoder{F} <: AbstractFiniteDimensionalNetwork
       hidden_layers::Tuple{Vararg{Int}}
       activation::F
     end
@@ -136,7 +152,7 @@ Recipe for an encoder-decoder pair for unsupervised dimensionality reduction.
 `(h₁,…,h_{L-1})` and the decoder mirrors them symmetrically; the input dimension
 is inferred from the training data.
 """
-struct AutoEncoder{F} <: NeuralNetwork
+struct AutoEncoder{F} <: AbstractFiniteDimensionalNetwork
   hidden_layers::Tuple{Vararg{Int}}
   activation::F
 end
@@ -152,7 +168,7 @@ function AutoEncoder(
 end
 
 """
-    struct VariationalAutoEncoder{F} <: NeuralNetwork
+    struct VariationalAutoEncoder{F} <: AbstractFiniteDimensionalNetwork
       hidden_layers::Tuple{Vararg{Int}}
       activation::F
       β::Float64
@@ -162,7 +178,7 @@ Recipe for a VAE with the reparameterisation trick. `hidden_layers = (h₁,…,h
 interpreted as for [`AutoEncoder`](@ref); `β` weighs the KL term against the
 reconstruction loss.
 """
-struct VariationalAutoEncoder{F} <: NeuralNetwork
+struct VariationalAutoEncoder{F} <: AbstractFiniteDimensionalNetwork
   hidden_layers::Tuple{Vararg{Int}}
   activation::F
   β::Float64
@@ -180,7 +196,7 @@ function VariationalAutoEncoder(
 end
 
 """
-    struct AutoDecoder{F} <: NeuralNetwork
+    struct AutoDecoder{F} <: AbstractFiniteDimensionalNetwork
       hidden_layers::Tuple{Vararg{Int}}
       activation::F
     end
@@ -189,7 +205,7 @@ Recipe for a decoder-only model (Park et al., 2019). Per-sample latent codes are
 optimised jointly with the decoder parameters. `hidden_layers = (h₁,…,latent_dim)`;
 the decoder is built from last to first, i.e. `(latent_dim,reverse(h₁,…,h_{L-1})…,n_h)`.
 """
-struct AutoDecoder{F} <: NeuralNetwork
+struct AutoDecoder{F} <: AbstractFiniteDimensionalNetwork
   hidden_layers::Tuple{Vararg{Int}}
   activation::F
 end

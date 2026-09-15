@@ -13,6 +13,36 @@ Wrap external Flux/Lux models with [`GenericNeuralNetwork`](@ref):
 """
 abstract type NeuralNetwork <: Map end
 
+
+"""
+    abstract type AbstractFiniteDimensionalNetwork <: NeuralNetwork end
+
+Abstract supertype for standard neural networks mapping between finite-dimensional Euclidean spaces (Vector -> Vector).
+"""
+abstract type AbstractFiniteDimensionalNetwork <: NeuralNetwork end
+
+"""
+    abstract type AbstractNeuralOperator <: NeuralNetwork end
+
+Abstract supertype for neural operators, which learn mappings between infinite-dimensional function spaces (Function -> Function).
+"""
+abstract type AbstractNeuralOperator <: NeuralNetwork end
+
+"""
+    abstract type AbstractCoordinateBasedOperator <: AbstractNeuralOperator end
+
+Abstract supertype for neural operators that evaluate the solution point-by-point using continuous physical coordinates.
+"""
+abstract type AbstractCoordinateBasedOperator <: AbstractNeuralOperator end
+
+"""
+    abstract type AbstractKernelNeuralOperator <: AbstractNeuralOperator end
+
+Abstract supertype for neural operators based on iterative kernel integration.
+These models process the entire spatial field or graph simultaneously rather than point-by-point.
+"""
+abstract type AbstractKernelNeuralOperator <: AbstractNeuralOperator end
+
 """
     struct GenericNeuralNetwork{A} <: NeuralNetwork
       model::A
