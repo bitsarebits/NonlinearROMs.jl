@@ -175,6 +175,43 @@ end
 normalise!(x,::Nothing) = x
 
 function Algebra.solve(
+    solver::NeuralSolver{A,<:KernelOperatorReduction},
+    op::NeuralOperator,
+    r::Realisation
+) where A
+
+    # Prepare input
+    red = get_state_reduction(solver)
+    strategy = get_strategy(red)
+    coords = get_coords(get_test(op.op))
+    
+    r_sampled = sample(get_sampler(strategy),r)
+    params,coords = get_formatted_data(Float32,r_sampled,coords)
+    
+    # Normalize inputs using training metadata prior to concatenation
+    normalise!((params,coords),op.metadata)
+    
+    # Build the 3D tensor expected by the Lifting Layer
+    input_tensor = _build_kernel_inputs(params,coords)
+
+    # Inference (denormalizes the output internally via the metadata fallback)
+    t = @timed begin
+        pred_cpu = op.model(input_tensor,op.metadata)
+    end
+
+    # Reshaping the [out_channels, N_nodes, Batch] output back to Snapshots format (N_dofs, n_samples)
+    out_channels = size(pred_cpu, 1)
+    n_nodes = size(coords, 2)
+    n_samples = size(params, 2)
+    pred_2d = reshape(pred_cpu, out_channels * n_nodes, n_samples)
+
+    x̂ = Snapshots(ConsecutiveParamArray(pred_2d),r)
+    stats = CostTracker(t,nruns=num_params(r),name="Kernel Operator Inference")
+
+    return x̂,stats
+end
+
+function Algebra.solve(
   solver::NeuralSolver{A,<:DeepONetReduction},
   op::NeuralOperator,
   r::Realisation

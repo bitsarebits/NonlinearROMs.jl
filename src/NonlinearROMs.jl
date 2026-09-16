@@ -72,6 +72,11 @@ export get_formatted_data
 include("Utils.jl")
 
 export NeuralNetwork
+export AbstractFiniteDimensionalNetwork
+export AbstractNeuralOperator
+export AbstractCoordinateBasedOperator
+export AbstractKernelNeuralOperator
+export AbstractIntegralKernel
 export GenericNeuralNetwork
 include("NeuralNetworks.jl")
 
@@ -92,6 +97,7 @@ include("Samplers.jl")
 
 export LatentCodeLayer
 export VAELayer
+export NeuralOperatorLayer
 include("NeuralLayers.jl")
 
 export DeepONet
@@ -101,6 +107,7 @@ export AutoEncoder
 export VariationalAutoEncoder
 export AutoDecoder
 export build_model
+export KernelNeuralOperator
 include("NeuralModels.jl")
 
 export NeuralOptimiser
@@ -111,6 +118,7 @@ export NOMADReduction
 export AutoEncoderReduction
 export AutoDecoderReduction
 export VAEReduction
+export KernelOperatorReduction
 include("NeuralReductions.jl")
 
 export TrainedNeuralModel

@@ -260,7 +260,7 @@ function get_formatted_data(::Type{T},s::TransientCoordinateSnapshots) where T
   data = zeros(T,N_dofs*N_time,n_samples)
   for i in 1:n_samples
     col = 1
-    for t_idx in 1:N_time, x_idx in 1:N_dofs
+    for t_idx in 1:N_time,x_idx in 1:N_dofs
       data[col,i] = data_3d[x_idx,i,t_idx]
       col += 1
     end
@@ -285,6 +285,29 @@ end
 
 function get_formatted_data(s)
   get_formatted_data(Float32,s)
+end
+
+# Constructs the 3D input tensor required by Kernel Neural Operators.
+# It concatenates the physical coordinates and parameter values to form the 
+# vector field (x, a(x)) representing the geometry and input function.
+# Returns a 3D tensor of size (dim_params + dim_x, n_nodes, n_samples) ready for the Lifting layer.
+function _build_kernel_inputs(params::AbstractArray{T,2}, coords::AbstractArray{T,2}) where T
+    dim_params,n_samples = size(params)
+    dim_x,n_nodes = size(coords)
+    
+    # Preallocate the 3D tensor: [Features, Nodes, Samples]
+    input_tensor = zeros(T,dim_params + dim_x,n_nodes,n_samples)
+    
+    @views for s in 1:n_samples
+        pₛ = params[:,s]
+        for n in 1:n_nodes
+            # Concatenate input parameters a(x) and spatial coords x
+            input_tensor[1:dim_params,n,s] .= pₛ
+            input_tensor[dim_params+1:end,n,s] .= coords[:,n]
+        end
+    end
+    
+    return input_tensor
 end
 
 # utils 
