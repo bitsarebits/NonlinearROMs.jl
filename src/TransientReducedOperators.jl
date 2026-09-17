@@ -1,6 +1,6 @@
 function Algebra.residual!(
   b::HRParamArray,
-  op::GenericRBOperator{O,T,A,<:NNContribution},
+  op::TransientRBOperator{O,T,A,<:NNContribution},
   r::TransientRealisation,
   us::Tuple{Vararg{AbstractVector}},
   paramcache
@@ -12,7 +12,7 @@ end
 
 function Algebra.jacobian!(
   A::HRParamArray,
-  op::GenericRBOperator{O,T,<:TupOfHighDimNNContribution,B},
+  op::TransientRBOperator{O,T,<:TransientNNContributionTuple,B},
   r::TransientRealisation,
   us::Tuple{Vararg{AbstractVector}},
   ws::Tuple{Vararg{Real}},

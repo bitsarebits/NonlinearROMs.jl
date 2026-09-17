@@ -15,30 +15,31 @@ into its own repository, and plugs back into them via multiple dispatch:
 - **Steady hyper-reduction** — `NNOperatorReduction` (operator regression),
   `NNHyperReduction` (NN-predicted EIM coefficients), `NNOperator`,
   `NNInterpolation`, extending `RBSteady.HRProjection`/`RBSteady.Interpolation`
-  and the `Algebra.residual!`/`Algebra.jacobian!` dispatch for `GenericRBOperator`.
+  and the `Algebra.residual!`/`Algebra.jacobian!` dispatch for `RBOperator`.
 
-- **Transient hyper-reduction** — `HighDimNNOperatorReduction`,
-  `HighDimNNHyperReduction`, the transient counterparts extending
+- **Transient hyper-reduction** — `TransientNNOperatorReduction`,
+  `TransientNNHyperReduction`, the transient counterparts extending
   `RBTransient`'s space-time hyper-reduction machinery analogously.
 
 Usage: construct a `NNHyperReduction`/`NNOperatorReduction`
-(or their `HighDim*` transient counterparts) and pass it to `RBSolver` wherever
+(or their `Transient*` transient counterparts) and pass it to `RBSolver` wherever
 a steady/transient `HyperReduction` is expected, exactly as you would
 `MDEIMHyperReduction` or `RBFHyperReduction`.
 """
 module NonlinearROMs
 
-using LinearAlgebra
-using Random
-using SparseArrays
-using Statistics
+using Enzyme
 using FillArrays
 using ForwardDiff
-using Optimisers
-using Enzyme
+using Graphs
+using LinearAlgebra
 using Lux
 using MLUtils
+using Optimisers
+using Random
 using Reactant
+using SparseArrays
+using Statistics
 
 using Gridap
 using Gridap.Algebra
@@ -67,7 +68,7 @@ export TrainingLog
 export ZscoreStats
 export normalise!
 export CoordinateSnapshots
-export get_coords
+export get_free_dof_coordinates
 export get_formatted_data
 include("Utils.jl")
 
@@ -165,12 +166,13 @@ include("SteadyInterpolations.jl")
 
 include("SteadyReducedOperators.jl")
 
-export HighDimNNOperatorReduction
-export HighDimNNHyperReduction
+export TransientNNOperatorReduction
+export TransientNNHyperReduction
 include("TransientReductions.jl")
 
-export HighDimNNProjection
-export HighDimNNContribution
+export TransientNNProjection
+export TransientNNContribution
+export TransientNNContributionTuple
 include("TransientHyperReductions.jl")
 
 include("TransientInterpolations.jl")

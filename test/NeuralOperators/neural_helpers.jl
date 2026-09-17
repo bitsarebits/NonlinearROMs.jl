@@ -125,7 +125,7 @@ end
   model = CartesianDiscreteModel((0.0,1.0),(2,))
   reffe = ReferenceFE(lagrangian,Float64,2)
   V = LexicographicFESpace(model,reffe)
-  @test get_coords(V) == Point.([0.0,0.25,0.5,0.75,1.0])
+  @test get_free_dof_coordinates(V) == Point.([0.0,0.25,0.5,0.75,1.0])
 end
 
 # Dummy Scheduler to test interface fallback

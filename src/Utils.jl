@@ -125,56 +125,38 @@ end
 # Data types
 
 """
-    get_coords(V::SingleFieldFESpace) -> Array{Point{D,Float64}}
+    get_free_dof_coordinates(V::SingleFieldFESpace) -> Array{Point{D,Float64}}
 
-Extracts the physical coordinates of the free DoFs of `V`, indexed consistently
-with `V`'s own free-dof numbering (the same numbering used by
-`get_all_data`/`get_free_dof_values` on `V`). Since the mapping is obtained by
-directly interpolating the coordinate field onto `V`, it is valid for any
-`SingleFieldFESpace` -- no special DoF ordering is required. Use
-`sample(sampler::MultiSampler,get_coords(V))` to subsample and stack the
-result into a `(D_phys,N_dofs)` `Matrix{Float32}`.
+Extracts the physical coordinates of the free DoFs of `V`.
 """
-function get_coords(V::SingleFieldFESpace)
-  orders = get_polynomial_orders(V)
+function get_free_dof_coordinates(V::SingleFieldFESpace)
   trian = get_triangulation(V)
-  model = get_background_model(trian)
-  cell_dofs = get_cell_dof_ids(V)
+  cell_dofs = get_data(get_fe_dof_basis(V))
+  cell_map = get_cell_map(trian)
+
+  cell_nodes = lazy_map(get_dof_to_nodes,cell_dofs)
+  cell_coords = lazy_map(evaluate,cell_map,cell_nodes)
+
+  cell_dof_ids = get_cell_dof_ids(V)
+
   nfree = num_free_dofs(V)
-  get_coords(model,cell_dofs,orders,nfree)
-end
-
-function get_coords(
-  model::CartesianDiscreteModel{D},
-  cell_dofs::AbstractArray,
-  orders::NTuple{D,Int},
-  nfree::Int
-  ) where D
-
-  desc = get_cartesian_descriptor(model)
-  cells = CartesianIndices(desc.partition)
-  cell_ids = LinearIndices(desc.partition)
-  coords = Vector{Point{D,Float64}}(undef,nfree)
-  cache = array_cache(cell_dofs)
-
-  p = cubic_polytope(Val(D))
-  local_nodes = pnode_to_local_node(p,orders)
-
-  for cell in cells
-    first_new_node = orders .* (Tuple(cell) .- 1) .+ 1
-    nodes_range = map(enumerate(first_new_node)) do (i,ni)
-      ni:(ni+orders[i])
-    end
-    celldofs = getindex!(cache,cell_dofs,cell_ids[cell])
-    for inode in Iterators.product(nodes_range...)
-      local_pos = CartesianIndex(inode .- first_new_node .+ 1)
-      local_node = local_nodes[local_pos]
-      dof = celldofs[local_node]
-      dof <= 0 && continue
-      coords[dof] = Point(ntuple(d -> desc.origin[d] + (inode[d]-1)*desc.sizes[d]/orders[d],Val{D}()))
+  D = num_cell_dims(trian)
+  fcoords = Vector{Point{D,Float64}}(undef,nfree)
+  cd = array_cache(cell_dof_ids)
+  cc = array_cache(cell_coords)
+  for cell in 1:num_cells(trian)
+    dofs = getindex!(cd,cell_dof_ids,cell)
+    coords = getindex!(cc,cell_coords,cell)
+    for (ldof,gdof) in enumerate(dofs)
+      gdof > 0 && (fcoords[gdof] = coords[ldof])
     end
   end
-  return coords
+
+  return fcoords
+end
+
+function get_free_dof_coordinates(V::MultiFieldFESpace)
+  map(get_free_dof_coordinates,V.spaces)
 end
 
 struct CoordinateSnapshots{T,N,Tc,Nc,A<:AbstractSnapshots{T,N},B<:AbstractArray{Tc,Nc}} <:AbstractSnapshots{T,N}
@@ -183,7 +165,7 @@ struct CoordinateSnapshots{T,N,Tc,Nc,A<:AbstractSnapshots{T,N},B<:AbstractArray{
 end
 
 function CoordinateSnapshots(snaps::AbstractSnapshots,V::FESpace)
-  coords = get_coords(V)
+  coords = get_free_dof_coordinates(V)
   CoordinateSnapshots(snaps,coords)
 end
 
@@ -195,7 +177,7 @@ ParamDataStructures.get_param_data(s::CoordinateSnapshots) = get_param_data(s.sn
 ParamDataStructures.get_initial_param_data(s::CoordinateSnapshots) = get_initial_param_data(s.snaps)
 DofMaps.get_dof_map(s::CoordinateSnapshots) = get_dof_map(s.snaps)
 ParamDataStructures.get_realisation(s::CoordinateSnapshots) = get_realisation(s.snaps)
-get_coords(s::CoordinateSnapshots) = s.coords
+get_free_dof_coordinates(s::CoordinateSnapshots) = s.coords
 
 function ParamDataStructures.select_snapshots(s::CoordinateSnapshots,pindex) 
   snaps = select_snapshots(s.snaps,pindex)
@@ -223,7 +205,7 @@ end
 
 function get_formatted_data(::Type{T},s::CoordinateSnapshots) where T
   data,params = get_formatted_data(T,s.snaps)
-  coords = T.(stack(p -> collect(p.data),vec(get_coords(s))))
+  coords = T.(stack(p -> collect(p.data),vec(get_free_dof_coordinates(s))))
   return (data,params,coords)
 end
 
@@ -253,7 +235,7 @@ end
 function get_formatted_data(::Type{T},s::TransientCoordinateSnapshots) where T
   data_3d,params = get_formatted_data(T,s.snaps) # data_3d: (N_dofs,n_samples,N_time)
   t_grid = T.(get_times(get_realisation(s)))
-  coords_raw = T.(stack(p -> collect(p.data),vec(get_coords(s)))) # (D_phys,N_dofs)
+  coords_raw = T.(stack(p -> collect(p.data),vec(get_free_dof_coordinates(s)))) # (D_phys,N_dofs)
   coords = _spacetime_coords(coords_raw,t_grid)
 
   N_dofs,n_samples,N_time = size(data_3d)
@@ -312,17 +294,5 @@ end
 
 # utils 
 
-cubic_polytope(::Val{d}) where d = @abstractmethod
-cubic_polytope(::Val{1}) = SEGMENT
-cubic_polytope(::Val{2}) = QUAD
-cubic_polytope(::Val{3}) = HEX
-
-function pnode_to_local_node(p::Polytope,orders)
-  _nodes, = Gridap.ReferenceFEs._compute_nodes(p,orders)
-  pnodes = Gridap.ReferenceFEs._coords_to_terms(_nodes,orders)
-  local_nodes = Array{Int}(undef,orders .+ 1)
-  for k in eachindex(pnodes)
-    local_nodes[pnodes[k]] = k
-  end
-  return local_nodes
-end
+get_dof_to_nodes(b) = @abstractmethod
+get_dof_to_nodes(b::LagrangianDofBasis) = b.nodes[b.dof_to_node]

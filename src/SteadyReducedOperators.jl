@@ -1,6 +1,6 @@
 function Algebra.residual!(
   b::HRParamArray,
-  op::GenericRBOperator{O,T,A,<:NNContribution},
+  op::RBOperator{O,T,A,<:NNContribution},
   r::Realisation,
   u::AbstractVector,
   paramcache
@@ -12,7 +12,7 @@ end
 
 function Algebra.jacobian!(
   A::HRParamArray,
-  op::GenericRBOperator{O,T,<:NNContribution,B},
+  op::RBOperator{O,T,<:NNContribution,B},
   r::Realisation,
   u::AbstractVector,
   paramcache

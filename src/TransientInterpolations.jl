@@ -1,10 +1,10 @@
 function RBSteady.Interpolation(
-  red::HighDimNNHyperReduction,
+  red::TransientNNHyperReduction,
   a::KroneckerProjection,
   s::TransientSnapshots
   )
 
-  inds,interp = empirical_interpolation(a)
+  inds,interp = DEIM(a)
   factor = lu(interp)
   r = get_params(get_realisation(s))
   red_data = RBTransient.get_at_kron_domain(s,inds...)
@@ -15,12 +15,12 @@ function RBSteady.Interpolation(
 end
 
 function RBSteady.Interpolation(
-  red::HighDimNNHyperReduction,
+  red::TransientNNHyperReduction,
   a::SequentialProjection,
   s::TransientSnapshots
   )
 
-  inds,interp = empirical_interpolation(a)
+  inds,interp = DEIM(a)
   factor = lu(interp)
   r = get_params(get_realisation(s))
   red_data = RBTransient.get_at_seq_domain(s,inds...)

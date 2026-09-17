@@ -35,7 +35,7 @@ function NeuralSolver(fesolver,reduction::NeuralReduction)
 end
 
 """
-    struct NeuralOperator{O,T,A<:TrainedNeuralModel,B} <: RBOperator{O,T}
+    struct NeuralOperator{O,T,A<:TrainedNeuralModel,B} <: ReducedOperator{O,T}
       op::ParamOperator{O,T}
       model::A
       metadata::B
@@ -55,7 +55,7 @@ and any normalization metadata needed to scale the data.
   the snapshot target data (`metadata.dmax`), used for the final denormalization of the
   network predictions.
 """
-struct NeuralOperator{O,T,A<:TrainedNeuralModel,B} <: RBOperator{O,T}
+struct NeuralOperator{O,T,A<:TrainedNeuralModel,B} <: ReducedOperator{O,T}
   op::ParamOperator{O,T}
   model::A
   metadata::B
@@ -183,7 +183,7 @@ function Algebra.solve(
     # Prepare input
     red = get_state_reduction(solver)
     strategy = get_strategy(red)
-    coords = get_coords(get_test(op.op))
+    coords = get_free_dof_coordinates(get_test(op.op))
     
     r_sampled = sample(get_sampler(strategy),r)
     params,coords = get_formatted_data(Float32,r_sampled,coords)
@@ -220,7 +220,7 @@ function Algebra.solve(
   # Prepare input
   red = get_state_reduction(solver)
   strategy = get_strategy(red)
-  coords = get_coords(get_test(op.op))
+  coords = get_free_dof_coordinates(get_test(op.op))
   r_sampled = sample(get_sampler(strategy),r)
   params,coords = get_formatted_data(Float32,r_sampled,coords)
   normalise!((params,coords),op.metadata)
@@ -245,7 +245,7 @@ function Algebra.solve(
   # Prepare input
   red = get_state_reduction(solver)
   strategy = get_strategy(red)
-  coords = get_coords(get_test(op.op))
+  coords = get_free_dof_coordinates(get_test(op.op))
   r_sampled = sample(get_sampler(strategy),r)
   params,coords = get_formatted_data(Float32,r_sampled,coords)
   pin,xin = _flatten(params,coords)

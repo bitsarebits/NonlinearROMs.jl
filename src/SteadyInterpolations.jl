@@ -17,7 +17,7 @@ function RBSteady.Interpolation(
   s::Snapshots
   )
 
-  inds,interp = empirical_interpolation(a)
+  inds,interp = DEIM(a)
   factor = lu(interp)
   r = get_realisation(s)
   red_data = RBSteady.get_at_domain(s,inds)

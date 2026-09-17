@@ -1,9 +1,9 @@
-const NNHRProjection{A<:Projection,B<:AbstractNNHyperReduction} = HRProjection{A,B}
+const NNHRProjection{A<:AbstractNNHyperReduction,B<:Projection} = HRProjection{A,B}
 
 function FESpaces.interpolate!(
   b̂::AbstractArray,
   cache,
-  a::NNHRProjection{<:Projection,<:NNHyperReduction},
+  a::NNHRProjection{<:NNHyperReduction,<:Projection},
   r::AbstractRealisation
   )
 
@@ -15,7 +15,7 @@ function FESpaces.interpolate!(
   return b̂
 end
 
-struct NNOperator{A,B} <: NNHRProjection{B,NNOperatorReduction}
+struct NNOperator{A,B} <: NNHRProjection{NNOperatorReduction,B}
   model::A
   bias::B
 end
@@ -31,7 +31,7 @@ function NNOperator(model::NeuralNetwork,trial::RBSpace,test::RBSpace)
   T = get_dof_value_type(trial)
   nrows = num_reduced_dofs(test)
   ncols = num_reduced_dofs(trial)
-  basis = ReducedProjection(zeros(T,nrows,1,ncols))
+  basis = ReducedProjection(zeros(T,nrows,ncols,1))
   NNOperator(model,basis)
 end
 
@@ -79,7 +79,7 @@ function RBSteady.HRProjection(
   r = get_realisation(s)
   A = GalerkinProjectable(s)
   y = galerkin_projection(test,A,trial)
-  ϕ = permutedims(get_basis(y),(1,3,2))
+  ϕ = get_basis(y)
   model = train_neural_coefficient(get_strategy(red),r,ϕ)
   return NNOperator(model,trial,test)
 end
@@ -116,7 +116,7 @@ function RBSteady.allocate_coefficient(a::NNOperator,r::AbstractRealisation)
   return_cache(a.model,x)
 end
 
-function RBSteady.allocate_coefficient(a::NNHRProjection{<:Projection,<:NNHyperReduction},r::AbstractRealisation)
+function RBSteady.allocate_coefficient(a::NNHRProjection{<:NNHyperReduction,<:Projection},r::AbstractRealisation)
   x = matrix_of_params(r)
   i = get_interpolation(a)
   return_cache(i.interpolation,x)
@@ -152,7 +152,7 @@ function FESpaces.interpolate!(
 end
 
 function RBSteady.allocate_coefficient(
-  a::BlockHRProjection{N,<:Any,<:AbstractNNHyperReduction},
+  a::BlockHRProjection{<:AbstractNNHyperReduction,<:Any,<:Any,N},
   r::AbstractRealisation
   ) where N
 
