@@ -12,7 +12,6 @@ tol=1e-4
 nparams=50
 nparams_res=floor(Int,nparams/3)
 nparams_jac=floor(Int,nparams/4)
-sketch=:sprn
 ncentroids=2
 
 pdomain = (1,10,1,10,1,10)
@@ -55,9 +54,9 @@ test = LexicographicFESpace(Ω,reffe;conformity=:H1,dirichlet_tags=[1,3,7])
 trial = ParamTrialFESpace(test,gμ)
 
 fesolver = LUSolver()
-state_reduction = Reduction(tol,H1();nparams,sketch,compression)
-res_reduction = NNHyperReduction(tol;nparams_res,sketch,compression)
-jac_reduction = NNHyperReduction(tol;nparams_jac,sketch,compression)
+state_reduction = Reduction(tol,H1();nparams,compression)
+res_reduction = NNHyperReduction(tol;nparams_res,compression)
+jac_reduction = NNHyperReduction(tol;nparams_jac,compression)
 rbsolver = RBSolver(fesolver,state_reduction,res_reduction,jac_reduction)
 
 feop = LinearParamOperator(res,stiffness,pspace,trial,test,domains)

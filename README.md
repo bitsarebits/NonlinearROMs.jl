@@ -25,7 +25,7 @@ Pkg.instantiate()
 using GridapROMs
 using NonlinearROMs
 
-res_reduction = NNHyperReduction(tol; nparams, sketch, compression)
+res_reduction = NNHyperReduction(tol; nparams, compression)
 jac_reduction = NNOperatorReduction(tol; nparams)
 rbsolver = RBSolver(fesolver, state_reduction, res_reduction, jac_reduction)
 ```

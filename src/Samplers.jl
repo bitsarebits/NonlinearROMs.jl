@@ -60,7 +60,7 @@ for T in (:(typeof(identity)),:Function,:Integer)
       # axes via `reshape` produces exactly that column order either way.
       pdata = ConsecutiveParamArray(reshape(data,size(data,1),:))
       sx = Snapshots(pdata,get_realisation(x))
-      xx = sample(s,get_free_dof_coordinates(x))
+      xx = sample(s,get_coordinates(x))
       CoordinateSnapshots(sx,xx)
     end
   end

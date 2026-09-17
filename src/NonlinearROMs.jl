@@ -63,23 +63,15 @@ using GridapROMs.Utils
 import GridapROMs.RBSteady:
   GlobalRBSolver,GlobalContext,get_reduction,get_state_reduction,get_interpolation,
   allocate_coefficient,allocate_hyper_reduction,allocate_hypred_cache
+import NearestNeighbors: KDTree,NNTree,knn
+import StaticArrays: SVector
 
 export TrainingLog
 export ZscoreStats
 export normalise!
 export CoordinateSnapshots
-export get_free_dof_coordinates
 export get_formatted_data
 include("Utils.jl")
-
-export NeuralNetwork
-export AbstractFiniteDimensionalNetwork
-export AbstractNeuralOperator
-export AbstractCoordinateBasedOperator
-export AbstractKernelNeuralOperator
-export AbstractIntegralKernel
-export GenericNeuralNetwork
-include("NeuralNetworks.jl")
 
 export LRScheduler
 export CosineAnnealing
@@ -96,10 +88,24 @@ export get_param_ids
 export get_time_ids
 include("Samplers.jl")
 
+export MeshGraph
+export DistanceGraph
+export build_graph
+include("GraphsInterface.jl")
+
 export LatentCodeLayer
 export VAELayer
 export NeuralOperatorLayer
 include("NeuralLayers.jl")
+
+export NeuralNetwork
+export AbstractFiniteDimensionalNetwork
+export AbstractNeuralOperator
+export AbstractCoordinateBasedOperator
+export AbstractKernelNeuralOperator
+export AbstractIntegralKernel
+export GenericNeuralNetwork
+include("NeuralNetworks.jl")
 
 export DeepONet
 export NOMAD

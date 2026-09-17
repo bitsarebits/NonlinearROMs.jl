@@ -124,38 +124,7 @@ end
 
 # Data types
 
-"""
-    get_free_dof_coordinates(V::SingleFieldFESpace) -> Array{Point{D,Float64}}
-
-Extracts the physical coordinates of the free DoFs of `V`.
-"""
-function get_free_dof_coordinates(V::SingleFieldFESpace)
-  trian = get_triangulation(V)
-  cell_dofs = get_data(get_fe_dof_basis(V))
-  cell_map = get_cell_map(trian)
-
-  cell_nodes = lazy_map(get_dof_to_nodes,cell_dofs)
-  cell_coords = lazy_map(evaluate,cell_map,cell_nodes)
-
-  cell_dof_ids = get_cell_dof_ids(V)
-
-  nfree = num_free_dofs(V)
-  D = num_cell_dims(trian)
-  fcoords = Vector{Point{D,Float64}}(undef,nfree)
-  cd = array_cache(cell_dof_ids)
-  cc = array_cache(cell_coords)
-  for cell in 1:num_cells(trian)
-    dofs = getindex!(cd,cell_dof_ids,cell)
-    coords = getindex!(cc,cell_coords,cell)
-    for (ldof,gdof) in enumerate(dofs)
-      gdof > 0 && (fcoords[gdof] = coords[ldof])
-    end
-  end
-
-  return fcoords
-end
-
-function get_free_dof_coordinates(V::MultiFieldFESpace)
+function FESpaces.get_free_dof_coordinates(V::MultiFieldFESpace)
   map(get_free_dof_coordinates,V.spaces)
 end
 
@@ -177,7 +146,7 @@ ParamDataStructures.get_param_data(s::CoordinateSnapshots) = get_param_data(s.sn
 ParamDataStructures.get_initial_param_data(s::CoordinateSnapshots) = get_initial_param_data(s.snaps)
 DofMaps.get_dof_map(s::CoordinateSnapshots) = get_dof_map(s.snaps)
 ParamDataStructures.get_realisation(s::CoordinateSnapshots) = get_realisation(s.snaps)
-get_free_dof_coordinates(s::CoordinateSnapshots) = s.coords
+get_coordinates(s::CoordinateSnapshots) = s.coords
 
 function ParamDataStructures.select_snapshots(s::CoordinateSnapshots,pindex) 
   snaps = select_snapshots(s.snaps,pindex)
@@ -205,7 +174,7 @@ end
 
 function get_formatted_data(::Type{T},s::CoordinateSnapshots) where T
   data,params = get_formatted_data(T,s.snaps)
-  coords = T.(stack(p -> collect(p.data),vec(get_free_dof_coordinates(s))))
+  coords = T.(stack(p -> collect(p.data),vec(get_coordinates(s))))
   return (data,params,coords)
 end
 
@@ -235,7 +204,7 @@ end
 function get_formatted_data(::Type{T},s::TransientCoordinateSnapshots) where T
   data_3d,params = get_formatted_data(T,s.snaps) # data_3d: (N_dofs,n_samples,N_time)
   t_grid = T.(get_times(get_realisation(s)))
-  coords_raw = T.(stack(p -> collect(p.data),vec(get_free_dof_coordinates(s)))) # (D_phys,N_dofs)
+  coords_raw = T.(stack(p -> collect(p.data),vec(get_coordinates(s)))) # (D_phys,N_dofs)
   coords = _spacetime_coords(coords_raw,t_grid)
 
   N_dofs,n_samples,N_time = size(data_3d)
