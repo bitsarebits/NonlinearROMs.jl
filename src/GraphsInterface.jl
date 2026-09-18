@@ -44,7 +44,10 @@ end
 
 function build_graph(s::DistanceGraph,V::FESpace)
   dof_to_coords = get_free_dof_coordinates(V)
-  kdtree = KDTree(map(x -> SVector(Tuple(x)),dof_to_coords))
+  data = map(x -> SVector(Tuple(x)),dof_to_coords)
+  D = num_cell_dims(get_triangulation(V))
+  metric = Minkowski(D)
+  kdtree = KDTree(data,metric)
   g = WeightedSimpleDiGraph(length(dof_to_coords))
   build_graph!(g,s,kdtree,dof_to_coords)
 end
@@ -57,7 +60,7 @@ function build_graph!(
   )
 
   for (dof,coord) in enumerate(dof_to_coords)
-    neighbors,distances = search(kdtree,s,coord)
+    neighbors,distances = search(s,kdtree,coord)
     for (neighbor,w) in zip(neighbors,distances)
       add_edge!(g,dof,neighbor,w)
     end

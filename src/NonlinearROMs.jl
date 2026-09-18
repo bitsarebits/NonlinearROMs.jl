@@ -35,6 +35,7 @@ using Graphs
 using LinearAlgebra
 using Lux
 using MLUtils
+using NearestNeighbors
 using Optimisers
 using Random
 using Reactant
@@ -63,7 +64,6 @@ using GridapROMs.Utils
 import GridapROMs.RBSteady:
   GlobalRBSolver,GlobalContext,get_reduction,get_state_reduction,get_interpolation,
   allocate_coefficient,allocate_hyper_reduction,allocate_hypred_cache
-import NearestNeighbors: KDTree,NNTree,knn
 import StaticArrays: SVector
 
 export TrainingLog
